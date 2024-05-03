@@ -21,16 +21,21 @@ import List.Extra as LE
 -}
 
 
-addDummyNodesAndSplitEdges : ( List DU.Layer, List DU.Edge ) -> ( ( List DU.Layer, List DU.Edge ), Dict DU.Edge (List G.NodeId) )
-addDummyNodesAndSplitEdges ( rankLayers, edges ) =
+addDummyNodesAndSplitEdges : Maybe G.NodeId -> ( List DU.Layer, List DU.Edge ) -> ( ( List DU.Layer, List DU.Edge ), Dict DU.Edge (List G.NodeId) )
+addDummyNodesAndSplitEdges maybeInitDummyNodeId ( rankLayers, edges ) =
     let
         initDummyId =
-            case List.concat rankLayers |> List.maximum of
+            case maybeInitDummyNodeId of
                 Just x ->
-                    x + 1
+                    x
 
                 Nothing ->
-                    1
+                    case List.concat rankLayers |> List.maximum of
+                        Just x ->
+                            x + 1
+
+                        Nothing ->
+                            1
 
         initControlPoints =
             Dict.fromList <| List.map (\e -> ( e, [] )) edges

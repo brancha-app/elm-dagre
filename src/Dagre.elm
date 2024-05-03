@@ -69,6 +69,7 @@ defaultConfig =
     , rankSep = 75
     , marginX = 20
     , marginY = 20
+    , initDummyNodeId = Nothing
     }
 
 
@@ -121,7 +122,7 @@ runLayout edits graph =
             DR.assignRanks newAcyclicGraph
 
         ( ( newRankList, newEdges ), controlPoints ) =
-            DN.addDummyNodesAndSplitEdges ( rankList, edges )
+            DN.addDummyNodesAndSplitEdges config.initDummyNodeId ( rankList, edges )
 
         bestRankList =
             DO.vertexOrder ( newRankList, newEdges )

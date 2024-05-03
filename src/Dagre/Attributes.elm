@@ -1,6 +1,6 @@
 module Dagre.Attributes exposing
     ( RankDir(..), Config, Attribute
-    , rankDir, widthDict, heightDict, width, height, nodeSep, edgeSep, rankSep, marginX, marginY
+    , rankDir, widthDict, heightDict, width, height, nodeSep, edgeSep, rankSep, marginX, marginY, initDummyNodeId
     )
 
 {-| Dagre Configuration Attributes
@@ -21,7 +21,7 @@ These function set the respective attributes for the algorithm
     then absolute value of `v` is used.
 2.  All numeric values are defined in pixels.
 
-@docs rankDir, widthDict, heightDict, width, height, nodeSep, edgeSep, rankSep, marginX, marginY
+@docs rankDir, widthDict, heightDict, width, height, nodeSep, edgeSep, rankSep, marginX, marginY, initDummyNodeId
 
 -}
 
@@ -46,6 +46,7 @@ type alias Config =
     , rankSep : Float
     , marginX : Float
     , marginY : Float
+    , initDummyNodeId : Maybe G.NodeId
     }
 
 
@@ -205,3 +206,16 @@ marginY : Float -> Attribute
 marginY mY =
     \a ->
         { a | marginY = abs mY }
+
+
+{-| Defines the initial value for Dummy node id. These dummy nodes act as control/bend points for edges.
+
+**Note** : You can safely assume that all the dummy nodes will have node ids greater than this value. This is attribute should only be used, when you are certain that you want to reserve node-ids till a certain range, to avoid mistakes during the drawing process.
+
+The default value is max( G.NodeIds ) + 1 (i.e. the next available node id)
+
+-}
+initDummyNodeId : G.NodeId -> Attribute
+initDummyNodeId dummyId =
+    \a ->
+        { a | initDummyNodeId = Just dummyId }
