@@ -191,33 +191,55 @@ horizontalCompaction ( config, g ) rankList root align =
         pred =
             getPredDict rankList
 
+        succ =
+            getSuccessorDict rankList
+
         xs =
             Dict.empty
 
         roots =
             List.filter (\v -> Just v == Dict.get v root) (List.concat rankList)
 
-        ( updShift, updSink, updXs ) =
-            List.foldl (placeBlock pred sepFn root align) ( shift, sink, xs ) roots
+        ( updSink, updXs ) =
+            List.foldl (placeBlock pred sepFn root align) ( sink, xs ) roots
+
+        updShift =
+            List.foldl (\l s -> classOffsets sepFn pred succ root align updSink updXs l s) shift rankList
 
         finXs =
-            List.foldl (\l xs_ -> List.foldl (assignAbsoluteX root updShift updSink) xs_ l) updXs rankList
+            List.foldl (\l xs_ -> List.foldl (assignAbsoluteX updShift updSink) xs_ l) updXs rankList
     in
     finXs
 
 
-placeBlock : NodeDict -> (G.NodeId -> G.NodeId -> Float) -> NodeDict -> NodeDict -> G.NodeId -> ( NodePointDict, NodeDict, NodePointDict ) -> ( NodePointDict, NodeDict, NodePointDict )
-placeBlock pred sepFn root align v ( shift, sink, xs ) =
+placeBlock : NodeDict -> (G.NodeId -> G.NodeId -> Float) -> NodeDict -> NodeDict -> G.NodeId -> ( NodeDict, NodePointDict ) -> ( NodeDict, NodePointDict )
+placeBlock pred sepFn root align v ( sink, xs ) =
     case Dict.get v xs of
         Nothing ->
             let
                 xsV =
                     Dict.insert v 0 xs
+
+                ( updatedSink, updatedXS ) =
+                    placeBlockHelper pred sepFn root align v v ( sink, xsV )
+
+                final_sink_v =
+                    Dict.get v updatedSink
+                        |> Maybe.withDefault v
+
+                final_x_v =
+                    Dict.get v updatedXS
+                        |> Maybe.withDefault 0
             in
-            placeBlockHelper pred sepFn root align v v ( shift, sink, xsV )
+            case Dict.get v align of
+                Nothing ->
+                    ( updatedSink, updatedXS )
+
+                Just w ->
+                    placeAlignWholeBlock w align v final_sink_v final_x_v ( updatedSink, updatedXS )
 
         Just _ ->
-            ( shift, sink, xs )
+            ( sink, xs )
 
 
 
@@ -228,41 +250,13 @@ placeBlock pred sepFn root align v ( shift, sink, xs ) =
 -}
 
 
-assignAbsoluteX : NodeDict -> NodePointDict -> NodeDict -> G.NodeId -> NodePointDict -> NodePointDict
-assignAbsoluteX root shift sink v xs =
+assignAbsoluteX : NodePointDict -> NodeDict -> G.NodeId -> NodePointDict -> NodePointDict
+assignAbsoluteX shift sink v xs =
     let
-        root_v =
-            getNode v root
-
-        xs_v =
-            case Dict.get root_v xs of
-                Nothing ->
-                    Dict.insert v 0 xs
-
-                Just xsRootV ->
-                    Dict.insert v xsRootV xs
-
-        shift_sink_root_v =
-            case Dict.get root_v sink of
-                Nothing ->
-                    DU.infinity
-
-                Just sink_root_v ->
-                    case Dict.get sink_root_v shift of
-                        Nothing ->
-                            DU.infinity
-
-                        Just shiftVal ->
-                            shiftVal
-
-        xs_v_shifted =
-            if v == root_v && shift_sink_root_v < DU.infinity then
-                Dict.update v (Maybe.map (\n -> n + shift_sink_root_v)) xs_v
-
-            else
-                xs_v
+        shift_sink_v_ =
+            Dict.get v sink |> Maybe.andThen (\sv -> Dict.get sv shift) |> Maybe.withDefault 0
     in
-    xs_v_shifted
+    Dict.update v (Maybe.map (\x -> x + shift_sink_v_)) xs
 
 
 sep : DA.Config -> G.Graph n e -> (G.NodeId -> G.NodeId -> Float)
@@ -679,75 +673,157 @@ getPredDict rankList =
     pred
 
 
-updateShiftOrXS : Float -> NodeDict -> G.NodeId -> G.NodeId -> ( NodePointDict, NodePointDict ) -> ( NodePointDict, NodePointDict )
-updateShiftOrXS delta sink u v ( shift, xs ) =
-    if Dict.get v sink /= Dict.get u sink then
+getSuccessorDictHelper : DU.Layer -> NodeDict -> NodeDict
+getSuccessorDictHelper layer succ =
+    let
+        successors =
+            List.drop 1 layer
+
+        nodes =
+            List.take (List.length layer - 1) layer
+
+        nodesWithSuccs =
+            List.map2 Tuple.pair nodes successors
+
+        finalDict =
+            List.foldl (\( n, s ) succDict -> Dict.insert n s succDict) succ nodesWithSuccs
+    in
+    finalDict
+
+
+getSuccessorDict : List DU.Layer -> NodeDict
+getSuccessorDict rankList =
+    let
+        initDict =
+            Dict.empty
+
+        succ =
+            List.foldl getSuccessorDictHelper initDict rankList
+    in
+    succ
+
+
+getNodeFromDict : G.NodeId -> NodeDict -> G.NodeId
+getNodeFromDict node dict =
+    case Dict.get node dict of
+        Just x ->
+            x
+
+        Nothing ->
+            node
+
+
+classOffsets : (G.NodeId -> G.NodeId -> Float) -> NodeDict -> NodeDict -> NodeDict -> NodeDict -> NodeDict -> NodePointDict -> DU.Layer -> NodePointDict -> NodePointDict
+classOffsets sepFn pred succ root align sink xs layer shift =
+    case List.head layer of
+        Just v ->
+            case Dict.get v sink of
+                Nothing ->
+                    shift
+
+                Just s_v ->
+                    if s_v == v then
+                        let
+                            updatedShift =
+                                if Dict.get v shift == Just DU.infinity then
+                                    Dict.update v (\_ -> Just 0) shift
+
+                                else
+                                    shift
+                        in
+                        classOffsetsHelper v sepFn pred succ root align sink xs updatedShift
+
+                    else
+                        shift
+
+        Nothing ->
+            shift
+
+
+classOffsetsHelper : G.NodeId -> (G.NodeId -> G.NodeId -> Float) -> NodeDict -> NodeDict -> NodeDict -> NodeDict -> NodeDict -> NodePointDict -> NodePointDict -> NodePointDict
+classOffsetsHelper v sepFn pred succ root align sink xs shift =
+    if getNodeFromDict v align /= getNodeFromDict v root then
         let
-            sink_u_ =
-                Dict.get u sink
-
-            xs_v_ =
-                Dict.get v xs
-
-            xs_u_ =
-                Dict.get u xs
-
-            shift_sink_u_ =
-                Maybe.andThen (\sink_u -> Dict.get sink_u shift) sink_u_
-
-            updateValue =
-                case ( shift_sink_u_, xs_v_, xs_u_ ) of
-                    ( Just ss_u, Just xs_v, Just xs_u ) ->
-                        Just (min ss_u (xs_v - xs_u - delta))
-
-                    _ ->
-                        Nothing
+            v_new =
+                getNodeFromDict v align
 
             updatedShift =
-                case sink_u_ of
-                    Just sink_u ->
-                        Dict.update sink_u (\_ -> updateValue) shift
-
-                    _ ->
+                case Dict.get v_new pred of
+                    Nothing ->
                         shift
+
+                    Just u ->
+                        let
+                            delta =
+                                sepFn u v_new
+
+                            sink_v_ =
+                                Dict.get v_new sink
+
+                            sink_u_ =
+                                Dict.get u sink
+
+                            xs_v_ =
+                                Dict.get v_new xs
+
+                            xs_u_ =
+                                Dict.get u xs
+
+                            shift_sink_v_ =
+                                Maybe.andThen (\sink_v -> Dict.get sink_v shift) sink_v_
+
+                            shift_sink_u_ =
+                                Maybe.andThen (\sink_u -> Dict.get sink_u shift) sink_u_
+
+                            updateValue =
+                                case ( ( shift_sink_u_, shift_sink_v_ ), ( xs_v_, xs_u_ ) ) of
+                                    ( ( Just ss_u, Just ss_v ), ( Just xs_v, Just xs_u ) ) ->
+                                        Just (min ss_u (ss_v + xs_v - xs_u - delta))
+
+                                    ( ( Nothing, Just ss_v ), ( Just xs_v, Just xs_u ) ) ->
+                                        Just (ss_v + xs_v - xs_u - delta)
+
+                                    _ ->
+                                        Nothing
+
+                            updShift =
+                                case sink_u_ of
+                                    Just sink_u ->
+                                        Dict.update sink_u (\_ -> updateValue) shift
+
+                                    _ ->
+                                        shift
+                        in
+                        updShift
         in
-        ( updatedShift, xs )
+        classOffsetsHelper v_new sepFn pred succ root align sink xs updatedShift
 
     else
-        let
-            xs_v_ =
-                Dict.get v xs
+        case Dict.get v succ of
+            Nothing ->
+                shift
 
-            xs_u_ =
-                Dict.get u xs
+            Just w ->
+                if getNodeFromDict v sink == getNodeFromDict w sink then
+                    classOffsetsHelper w sepFn pred succ root align sink xs shift
 
-            updateValue =
-                case ( xs_v_, xs_u_ ) of
-                    ( Just xs_v, Just xs_u ) ->
-                        Just (max xs_v (xs_u + delta))
-
-                    _ ->
-                        Nothing
-
-            updatedXS =
-                Dict.update v (\_ -> updateValue) xs
-        in
-        ( shift, updatedXS )
+                else
+                    shift
 
 
-placePredecessor : G.NodeId -> NodeDict -> (G.NodeId -> G.NodeId -> Float) -> NodeDict -> NodeDict -> G.NodeId -> G.NodeId -> ( NodePointDict, NodeDict, NodePointDict ) -> ( NodePointDict, NodeDict, NodePointDict )
-placePredecessor p pred sepFn root align v w ( shift, sink, xs ) =
+placePredecessor : G.NodeId -> NodeDict -> (G.NodeId -> G.NodeId -> Float) -> NodeDict -> NodeDict -> G.NodeId -> G.NodeId -> ( NodeDict, NodePointDict ) -> ( NodeDict, NodePointDict )
+placePredecessor p pred sepFn root align v w ( sink, xs ) =
     let
         root_p_ =
             Dict.get p root
 
-        ( pred_shift, pred_sink, pred_xs ) =
+        ( pred_sink, pred_xs ) =
             case root_p_ of
                 Nothing ->
-                    ( shift, sink, xs )
+                    ( sink, xs )
 
                 Just u ->
-                    placeBlock pred sepFn root align u ( shift, sink, xs )
+                    placeBlock pred sepFn root align u ( sink, xs )
 
         updatedSink =
             if Dict.get v pred_sink == Just v then
@@ -759,41 +835,81 @@ placePredecessor p pred sepFn root align v w ( shift, sink, xs ) =
         delta =
             sepFn w p
 
-        ( updatedShift, updatedXS ) =
+        updatedXS =
             case root_p_ of
                 Nothing ->
-                    ( pred_shift, pred_xs )
+                    pred_xs
 
                 Just u ->
-                    updateShiftOrXS delta updatedSink u v ( pred_shift, pred_xs )
+                    if Dict.get v updatedSink == Dict.get u updatedSink then
+                        let
+                            xs_v_ =
+                                Dict.get v pred_xs
+
+                            xs_u_ =
+                                Dict.get u pred_xs
+
+                            updateValue =
+                                case ( xs_v_, xs_u_ ) of
+                                    ( Just xs_v, Just xs_u ) ->
+                                        Just (max xs_v (xs_u + delta))
+
+                                    _ ->
+                                        Nothing
+                        in
+                        Dict.update v (\_ -> updateValue) pred_xs
+
+                    else
+                        pred_xs
     in
-    ( updatedShift, updatedSink, updatedXS )
+    ( updatedSink, updatedXS )
 
 
-placeBlockHelper : NodeDict -> (G.NodeId -> G.NodeId -> Float) -> NodeDict -> NodeDict -> G.NodeId -> G.NodeId -> ( NodePointDict, NodeDict, NodePointDict ) -> ( NodePointDict, NodeDict, NodePointDict )
-placeBlockHelper pred sepFn root align v w ( shift, sink, xs ) =
+placeBlockHelper : NodeDict -> (G.NodeId -> G.NodeId -> Float) -> NodeDict -> NodeDict -> G.NodeId -> G.NodeId -> ( NodeDict, NodePointDict ) -> ( NodeDict, NodePointDict )
+placeBlockHelper pred sepFn root align v w ( sink, xs ) =
     let
-        ( final_shift, final_sink, final_xs ) =
+        ( final_sink, final_xs ) =
             case Dict.get w pred of
                 Nothing ->
-                    ( shift, sink, xs )
+                    ( sink, xs )
 
                 Just p ->
-                    placePredecessor p pred sepFn root align v w ( shift, sink, xs )
+                    placePredecessor p pred sepFn root align v w ( sink, xs )
 
         w_new_ =
             Dict.get w align
     in
     if w_new_ == Just v then
-        ( final_shift, final_sink, final_xs )
+        ( final_sink, final_xs )
 
     else
         case w_new_ of
             Nothing ->
-                ( final_shift, final_sink, final_xs )
+                ( final_sink, final_xs )
 
             Just w_new ->
-                placeBlockHelper pred sepFn root align v w_new ( final_shift, final_sink, final_xs )
+                placeBlockHelper pred sepFn root align v w_new ( final_sink, final_xs )
+
+
+placeAlignWholeBlock : G.NodeId -> NodeDict -> G.NodeId -> G.NodeId -> Float -> ( NodeDict, NodePointDict ) -> ( NodeDict, NodePointDict )
+placeAlignWholeBlock w align v sink_v x_v ( sink, xs ) =
+    let
+        updatedXS =
+            Dict.update w (always <| Just x_v) xs
+
+        updatedSink =
+            Dict.update w (always <| Just sink_v) sink
+    in
+    case Dict.get w align of
+        Nothing ->
+            ( updatedSink, updatedXS )
+
+        Just w_new ->
+            if w_new /= v then
+                placeAlignWholeBlock w_new align v sink_v x_v ( updatedSink, updatedXS )
+
+            else
+                ( updatedSink, updatedXS )
 
 
 width : DA.Config -> (G.NodeId -> Float)
