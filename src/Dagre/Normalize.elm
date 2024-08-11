@@ -3,6 +3,7 @@ module Dagre.Normalize exposing (addDummyNodesAndSplitEdges)
 import Dagre.Utils as DU
 import Dict exposing (Dict)
 import Graph as G
+import IntDict exposing (IntDict)
 import List.Extra as LE
 
 
@@ -37,12 +38,15 @@ addDummyNodesAndSplitEdges maybeInitDummyNodeId ( rankLayers, edges ) =
                         Nothing ->
                             1
 
+        nodeRankDict =
+            DU.getNodeRankDict rankLayers
+
         initControlPoints =
             Dict.fromList <| List.map (\e -> ( e, [] )) edges
 
         ( ( newRankLayers, _ ), ( newEdges, newControlPoints ) ) =
             List.foldl
-                checkAndSplitMultiSpanEdge
+                (checkAndSplitMultiSpanEdge nodeRankDict)
                 ( ( rankLayers, initDummyId ), ( edges, initControlPoints ) )
                 edges
     in
@@ -61,14 +65,11 @@ addDummyNodesAndSplitEdges maybeInitDummyNodeId ( rankLayers, edges ) =
 -}
 
 
-checkAndSplitMultiSpanEdge : DU.Edge -> ( ( List DU.Layer, G.NodeId ), ( List DU.Edge, Dict DU.Edge (List G.NodeId) ) ) -> ( ( List DU.Layer, G.NodeId ), ( List DU.Edge, Dict DU.Edge (List G.NodeId) ) )
-checkAndSplitMultiSpanEdge ( from, to ) ( ( rankLayers, dummyId ), ( edges, controlPoints ) ) =
+checkAndSplitMultiSpanEdge : IntDict Int -> DU.Edge -> ( ( List DU.Layer, G.NodeId ), ( List DU.Edge, Dict DU.Edge (List G.NodeId) ) ) -> ( ( List DU.Layer, G.NodeId ), ( List DU.Edge, Dict DU.Edge (List G.NodeId) ) )
+checkAndSplitMultiSpanEdge nodeRankDict ( from, to ) ( ( rankLayers, dummyId ), ( edges, controlPoints ) ) =
     let
-        fromRank =
-            DU.getRank from rankLayers
-
-        toRank =
-            DU.getRank to rankLayers
+        ( fromRank, toRank ) =
+            ( DU.getRank from nodeRankDict, DU.getRank to nodeRankDict )
     in
     if toRank - fromRank > 1 then
         let

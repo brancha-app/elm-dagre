@@ -1,6 +1,7 @@
 module Dagre.Utils exposing (..)
 
 import Graph as G
+import IntDict exposing (IntDict)
 import List.Extra as LE
 
 
@@ -70,9 +71,16 @@ getInEdges nodeId edges =
     List.filter (\e -> (Tuple.first e |> Tuple.second) == nodeId) edges
 
 
-getRank : G.NodeId -> List Layer -> Int
-getRank nodeId layers =
-    case LE.findIndex (List.member nodeId) layers of
+getNodeRankDict : List Layer -> IntDict Int
+getNodeRankDict layers =
+    List.indexedMap (\idx layer -> List.map (\node -> ( node, idx )) layer) layers
+        |> List.concat
+        |> IntDict.fromList
+
+
+getRank : G.NodeId -> IntDict Int -> Int
+getRank nodeId nodeRankDict =
+    case IntDict.get nodeId nodeRankDict of
         Just x ->
             x
 
