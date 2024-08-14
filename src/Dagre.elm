@@ -125,7 +125,7 @@ runLayout edits graph =
             DN.addDummyNodesAndSplitEdges config.initDummyNodeId ( rankList, edges )
 
         bestRankList =
-            DO.vertexOrder ( newRankList, newEdges )
+            DO.vertexOrder newRankList
 
         ( finalDict, ( w, h ) ) =
             DP.position config newGraph ( bestRankList, newEdges )

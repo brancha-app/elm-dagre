@@ -1,6 +1,7 @@
 module Dagre.Order.CrossCount exposing (crossCount)
 
 import Dagre.Utils as DU
+import IntDict
 import List.Extra as LE
 
 
@@ -100,11 +101,11 @@ insertionSortWithInversionAccumulator nodes =
 -}
 
 
-biLayerCrossCount : List DU.Edge -> ( DU.Layer, DU.Layer ) -> Int
-biLayerCrossCount edges ( l1, l2 ) =
+biLayerCrossCount : ( DU.Layer, DU.Layer ) -> Int
+biLayerCrossCount ( l1, l2 ) =
     let
         reqEdges =
-            DU.getEdgesDirectedFromLayers ( l1, l2 ) edges
+            l1.outgoingEdges
 
         reqSouthernPoints =
             mapAndSortEdges ( l1, l2 ) reqEdges
@@ -119,19 +120,24 @@ biLayerCrossCount edges ( l1, l2 ) =
 {- counts Crossing edges for a rank list -}
 
 
-crossCount : ( List DU.Layer, List DU.Edge ) -> Int
-crossCount ( rankList, edges ) =
+crossCount : DU.RankedLayers -> Int
+crossCount rankedLayers =
     let
+        ( minRank, maxRank ) =
+            IntDict.keys rankedLayers
+                |> (\ranks -> ( List.minimum ranks, List.maximum ranks ))
+                |> (\( maybeMin, maybeMax ) -> ( Maybe.withDefault 0 maybeMin, Maybe.withDefault 0 maybeMax ))
+
         fromLayers =
-            List.take (List.length rankList - 1) rankList
+            List.range minRank (maxRank - 1)
 
         toLayers =
-            List.drop 1 rankList
+            List.range (minRank + 1) maxRank
 
         adjacentLayers =
-            List.map2 (\l1 l2 -> ( l1, l2 )) fromLayers toLayers
+            List.map2 (\l1 l2 -> ( DU.getLayer l1 rankedLayers, DU.getLayer l2 rankedLayers )) fromLayers toLayers
 
         cc =
-            List.map (biLayerCrossCount edges) adjacentLayers |> List.foldl (+) 0
+            List.map biLayerCrossCount adjacentLayers |> List.foldl (+) 0
     in
     cc

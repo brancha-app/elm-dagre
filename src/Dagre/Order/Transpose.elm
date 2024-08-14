@@ -2,6 +2,7 @@ module Dagre.Order.Transpose exposing (transpose)
 
 import Dagre.Order.CrossCount as DOC
 import Dagre.Utils as DU
+import IntDict exposing (IntDict)
 import List.Extra as LE
 
 
@@ -15,30 +16,34 @@ import List.Extra as LE
 -}
 
 
-transpose : List DU.Edge -> List DU.Layer -> List DU.Layer
-transpose edges layering =
+transpose : DU.RankedLayers -> DU.RankedLayers
+transpose rankedLayers =
     let
         ( newLayering, improved ) =
-            optimizeViaTranspose edges layering
+            optimizeViaTranspose rankedLayers
     in
     if improved then
-        transpose edges newLayering
+        transpose newLayering
 
     else
-        layering
+        rankedLayers
 
 
-optimizeViaTranspose : List DU.Edge -> List DU.Layer -> ( List DU.Layer, Bool )
-optimizeViaTranspose edges layering =
+optimizeViaTranspose : DU.RankedLayers -> ( DU.RankedLayers, Bool )
+optimizeViaTranspose layering =
     let
         maxRank =
-            List.length layering - 1
+            (IntDict.keys layering
+                |> List.maximum
+                |> Maybe.withDefault 0
+            )
+                - 1
 
         ranks =
             List.range 0 maxRank
 
         ( newLayering, improved ) =
-            List.foldl (optimizeLayer edges) ( layering, False ) ranks
+            List.foldl optimizeLayer ( layering, False ) ranks
     in
     ( newLayering, improved )
 
@@ -50,8 +55,8 @@ optimizeViaTranspose edges layering =
 -}
 
 
-optimizeLayer : List DU.Edge -> Int -> ( List DU.Layer, Bool ) -> ( List DU.Layer, Bool )
-optimizeLayer edges rank ( layering, improved ) =
+optimizeLayer : Int -> ( DU.RankedLayers, Bool ) -> ( DU.RankedLayers, Bool )
+optimizeLayer rank ( layering, improved ) =
     let
         prevLayer =
             DU.getLayer (rank - 1) layering
@@ -63,12 +68,12 @@ optimizeLayer edges rank ( layering, improved ) =
             DU.getLayer (rank + 1) layering
 
         positions =
-            List.range 0 (List.length curLayer - 2)
+            List.range 0 (List.length curLayer.nodes - 2)
 
         ( newCurLayer, newImproved ) =
-            List.foldl (optimizeNodePosition edges ( prevLayer, nextLayer )) ( curLayer, improved ) positions
+            List.foldl (optimizeNodePosition ( prevLayer, nextLayer )) ( curLayer, improved ) positions
     in
-    ( LE.setAt rank newCurLayer layering, newImproved )
+    ( IntDict.update rank (Maybe.map (\layer -> { layer | nodes = newCurLayer.nodes })) layering, newImproved )
 
 
 
@@ -78,19 +83,27 @@ optimizeLayer edges rank ( layering, improved ) =
 -}
 
 
-optimizeNodePosition : List DU.Edge -> ( DU.Layer, DU.Layer ) -> Int -> ( DU.Layer, Bool ) -> ( DU.Layer, Bool )
-optimizeNodePosition edges ( prevLayer, nextLayer ) i ( curLayer, improved ) =
+optimizeNodePosition : ( DU.Layer, DU.Layer ) -> Int -> ( DU.Layer, Bool ) -> ( DU.Layer, Bool )
+optimizeNodePosition ( prevLayer, nextLayer ) i ( curLayer, improved ) =
     let
         newCurLayer =
-            LE.swapAt i (i + 1) curLayer
+            { curLayer | nodes = LE.swapAt i (i + 1) curLayer.nodes }
 
         oldLayers =
-            [ prevLayer, curLayer, nextLayer ]
+            IntDict.fromList
+                [ ( 0, prevLayer )
+                , ( 1, curLayer )
+                , ( 2, nextLayer )
+                ]
 
         newLayers =
-            [ prevLayer, newCurLayer, nextLayer ]
+            IntDict.fromList
+                [ ( 0, prevLayer )
+                , ( 1, newCurLayer )
+                , ( 2, nextLayer )
+                ]
     in
-    if DOC.crossCount ( newLayers, edges ) < DOC.crossCount ( oldLayers, edges ) then
+    if DOC.crossCount newLayers < DOC.crossCount oldLayers then
         ( newCurLayer, True )
 
     else

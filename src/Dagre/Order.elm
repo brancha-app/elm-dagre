@@ -5,6 +5,7 @@ import Dagre.Order.CrossCount as DOC
 import Dagre.Order.Init as DOI
 import Dagre.Order.Transpose as DOT
 import Dagre.Utils as DU
+import IntDict
 
 
 
@@ -19,16 +20,16 @@ import Dagre.Utils as DU
 -}
 
 
-vertexOrder : ( List DU.Layer, List DU.Edge ) -> List DU.Layer
-vertexOrder ( layering, edges ) =
+vertexOrder : DU.RankedLayers -> DU.RankedLayers
+vertexOrder layering =
     let
         initLayering =
             DOI.initOrder layering
 
         bestCC =
-            DOC.crossCount ( initLayering, edges )
+            DOC.crossCount initLayering
     in
-    optimizeOrdering ( initLayering, edges ) bestCC ( 0, 0 )
+    optimizeOrdering initLayering bestCC ( 0, 0 )
 
 
 
@@ -37,24 +38,24 @@ vertexOrder ( layering, edges ) =
 -}
 
 
-optimizeOrdering : ( List DU.Layer, List DU.Edge ) -> Int -> ( Int, Int ) -> List DU.Layer
-optimizeOrdering ( layering, edges ) bestCC ( iter, lastBest ) =
+optimizeOrdering : DU.RankedLayers -> Int -> ( Int, Int ) -> DU.RankedLayers
+optimizeOrdering layering bestCC ( iter, lastBest ) =
     if lastBest < 3 then
         let
             newLayering =
-                sweepLayers ( layering, edges ) iter
+                sweepLayers layering iter
 
             newTransposedLayering =
-                DOT.transpose edges newLayering
+                DOT.transpose newLayering
 
             newCC =
-                DOC.crossCount ( newTransposedLayering, edges )
+                DOC.crossCount newTransposedLayering
         in
         if newCC < bestCC then
-            optimizeOrdering ( newTransposedLayering, edges ) newCC ( iter + 1, 0 )
+            optimizeOrdering newTransposedLayering newCC ( iter + 1, 0 )
 
         else
-            optimizeOrdering ( layering, edges ) bestCC ( iter + 1, lastBest + 1 )
+            optimizeOrdering layering bestCC ( iter + 1, lastBest + 1 )
 
     else
         layering
@@ -66,16 +67,20 @@ optimizeOrdering ( layering, edges ) bestCC ( iter, lastBest ) =
 -}
 
 
-sweepLayers : ( List DU.Layer, List DU.Edge ) -> Int -> List DU.Layer
-sweepLayers ( layering, edges ) iter =
+sweepLayers : DU.RankedLayers -> Int -> DU.RankedLayers
+sweepLayers rankedLayers iter =
     let
         maxRank =
-            List.length layering - 1
+            (IntDict.keys rankedLayers
+                |> List.maximum
+                |> Maybe.withDefault 0
+            )
+                - 1
     in
     if modBy 2 iter == 0 then
         -- Applies BarryCenter Heuristic from layer 1 (0 based index) to Last layer
-        List.foldl (DOB.barycenter edges DOB.PreviousLayer) layering (List.range 1 maxRank)
+        List.foldl (DOB.barycenter DOB.PreviousLayer) rankedLayers (List.range 1 maxRank)
 
     else
         -- Applies BarryCenter Heuristic from 2nd last layer to 0th layer
-        List.foldl (DOB.barycenter edges DOB.NextLayer) layering (List.range 0 (maxRank - 1) |> List.reverse)
+        List.foldl (DOB.barycenter DOB.NextLayer) rankedLayers (List.range 0 (maxRank - 1) |> List.reverse)

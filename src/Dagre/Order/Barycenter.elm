@@ -2,6 +2,7 @@ module Dagre.Order.Barycenter exposing (FixedLayer(..), barycenter)
 
 import Dagre.Utils as DU
 import Graph as G
+import IntDict
 import List.Extra as LE
 
 
@@ -34,27 +35,27 @@ type FixedLayer
 -}
 
 
-barycenter : List DU.Edge -> FixedLayer -> Int -> List DU.Layer -> List DU.Layer
-barycenter edges fixedLayer movableLayerRank layering =
+barycenter : FixedLayer -> Int -> DU.RankedLayers -> DU.RankedLayers
+barycenter fixedLayer movableLayerRank rankedLayers =
     let
         movableLayer =
-            DU.getLayer movableLayerRank layering
+            DU.getLayer movableLayerRank rankedLayers
 
-        ( neighbourFn, adjLayer ) =
+        adjLayer =
             case fixedLayer of
                 PreviousLayer ->
-                    ( DU.alongIncomingEdges edges, DU.getLayer (movableLayerRank - 1) layering )
+                    DU.getLayer (movableLayerRank - 1) rankedLayers
 
                 NextLayer ->
-                    ( DU.alongOutgoingEdges edges, DU.getLayer (movableLayerRank + 1) layering )
+                    DU.getLayer (movableLayerRank + 1) rankedLayers
 
         baryCenterValues =
-            List.map (\n -> ( n, calcBarycenter n neighbourFn adjLayer )) movableLayer
+            List.map (\n -> ( n, calcBarycenter n fixedLayer adjLayer )) movableLayer.nodes
 
         newOrder =
             List.sortBy Tuple.second baryCenterValues |> List.map Tuple.first
     in
-    LE.setAt movableLayerRank newOrder layering
+    IntDict.update movableLayerRank (Maybe.map (\layer -> { layer | nodes = newOrder })) rankedLayers
 
 
 
@@ -72,11 +73,16 @@ barycenter edges fixedLayer movableLayerRank layering =
 -}
 
 
-calcBarycenter : G.NodeId -> DU.NeighbourFn -> DU.Layer -> Float
-calcBarycenter nodeId neighbourFn adjLayer =
+calcBarycenter : G.NodeId -> FixedLayer -> DU.Layer -> Float
+calcBarycenter nodeId fixedLayer adjLayer =
     let
         adj_nodes =
-            neighbourFn nodeId
+            case fixedLayer of
+                PreviousLayer ->
+                    adjLayer.outgoingEdges |> List.filter (\( _, to ) -> to == nodeId) |> List.map Tuple.first
+
+                NextLayer ->
+                    adjLayer.incomingEdges |> List.filter (\( from, _ ) -> from == nodeId) |> List.map Tuple.second
 
         adj_positions =
             List.map (DU.getOrder adjLayer) adj_nodes

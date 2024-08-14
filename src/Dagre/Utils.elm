@@ -29,7 +29,18 @@ type alias Edge =
 
 
 type alias Layer =
+    { nodes : List G.NodeId
+    , incomingEdges : List Edge
+    , outgoingEdges : List Edge
+    }
+
+
+type alias OldLayer =
     List G.NodeId
+
+
+type alias RankedLayers =
+    IntDict Layer
 
 
 type EdgeType
@@ -45,13 +56,30 @@ type alias NeighbourFn =
     G.NodeId -> List G.NodeId
 
 
+toEdge : G.Edge e -> Edge
+toEdge e =
+    ( e.from, e.to )
+
+
+fromIncoming : G.Adjacency e -> G.NodeId -> List Edge
+fromIncoming adjDict to =
+    IntDict.keys adjDict
+        |> List.map (\from -> ( from, to ))
+
+
+fromOutgoing : G.Adjacency e -> G.NodeId -> List Edge
+fromOutgoing adjDict from =
+    IntDict.keys adjDict
+        |> List.map (\to -> ( from, to ))
+
+
 getEdges : G.Graph n e -> List Edge
 getEdges g =
     let
         edges =
             G.edges g
     in
-    List.map (\e -> ( e.from, e.to )) edges
+    List.map toEdge edges
 
 
 alongOutgoingEdges : List Edge -> G.NodeId -> List G.NodeId
@@ -71,9 +99,10 @@ getInEdges nodeId edges =
     List.filter (\e -> (Tuple.first e |> Tuple.second) == nodeId) edges
 
 
-getNodeRankDict : List Layer -> IntDict Int
-getNodeRankDict layers =
-    List.indexedMap (\idx layer -> List.map (\node -> ( node, idx )) layer) layers
+getNodeRankDict : RankedLayers -> IntDict Int
+getNodeRankDict rankedLayers =
+    IntDict.toList rankedLayers
+        |> List.map (\( rank, layer ) -> List.map (\node -> ( node, rank )) layer.nodes)
         |> List.concat
         |> IntDict.fromList
 
@@ -109,6 +138,16 @@ getEdgesFromPath path =
 
 getOrder : Layer -> G.NodeId -> Int
 getOrder l nodeId =
+    case LE.elemIndex nodeId l.nodes of
+        Just idx ->
+            idx
+
+        Nothing ->
+            -1
+
+
+getOrderOldLayer : OldLayer -> G.NodeId -> Int
+getOrderOldLayer l nodeId =
     case LE.elemIndex nodeId l of
         Just idx ->
             idx
@@ -122,12 +161,17 @@ mapEdgeToOrder ( l1, l2 ) e =
     Tuple.mapBoth (getOrder l1) (getOrder l2) e
 
 
-mapEdgeWithTypeToOrder : ( Layer, Layer ) -> EdgeWithType -> EdgeWithType
+mapEdgeToOrderOldLayer : ( OldLayer, OldLayer ) -> Edge -> Edge
+mapEdgeToOrderOldLayer ( l1, l2 ) e =
+    Tuple.mapBoth (getOrderOldLayer l1) (getOrderOldLayer l2) e
+
+
+mapEdgeWithTypeToOrder : ( OldLayer, OldLayer ) -> EdgeWithType -> EdgeWithType
 mapEdgeWithTypeToOrder ( l1, l2 ) e =
-    Tuple.mapFirst (mapEdgeToOrder ( l1, l2 )) e
+    Tuple.mapFirst (mapEdgeToOrderOldLayer ( l1, l2 )) e
 
 
-getNodeFromOrder : Layer -> Int -> G.NodeId
+getNodeFromOrder : OldLayer -> Int -> G.NodeId
 getNodeFromOrder l order =
     case LE.getAt order l of
         Just n ->
@@ -137,27 +181,27 @@ getNodeFromOrder l order =
             intMin
 
 
-mapEdgeOrderToNode : ( Layer, Layer ) -> Edge -> Edge
+mapEdgeOrderToNode : ( OldLayer, OldLayer ) -> Edge -> Edge
 mapEdgeOrderToNode ( l1, l2 ) e =
     Tuple.mapBoth (getNodeFromOrder l1) (getNodeFromOrder l2) e
 
 
-mapEdgeWithTypeToNodes : ( Layer, Layer ) -> EdgeWithType -> EdgeWithType
+mapEdgeWithTypeToNodes : ( OldLayer, OldLayer ) -> EdgeWithType -> EdgeWithType
 mapEdgeWithTypeToNodes ( l1, l2 ) e =
     Tuple.mapFirst (mapEdgeOrderToNode ( l1, l2 )) e
 
 
-getEdgesDirectedFromLayers : ( Layer, Layer ) -> List Edge -> List Edge
-getEdgesDirectedFromLayers ( l1, l2 ) edges =
-    List.filter (\( from, to ) -> List.member from l1 && List.member to l2) edges
+getEdgesDirectedFromLayers : ( Layer, Layer ) -> List Edge
+getEdgesDirectedFromLayers ( l1, l2 ) =
+    l1.outgoingEdges
 
 
-getEdgesWithTypeDirectedFromLayers : ( Layer, Layer ) -> List EdgeWithType -> List EdgeWithType
+getEdgesWithTypeDirectedFromLayers : ( OldLayer, OldLayer ) -> List EdgeWithType -> List EdgeWithType
 getEdgesWithTypeDirectedFromLayers ( l1, l2 ) edges =
     List.filter (\( ( from, to ), _ ) -> List.member from l1 && List.member to l2) edges
 
 
-getAdjacentLayerPairs : List Layer -> List ( Layer, Layer )
+getAdjacentLayerPairs : List OldLayer -> List ( OldLayer, OldLayer )
 getAdjacentLayerPairs rankList =
     let
         fromLayers =
@@ -169,13 +213,18 @@ getAdjacentLayerPairs rankList =
     List.map2 (\l1 l2 -> ( l1, l2 )) fromLayers toLayers
 
 
-getLayer : Int -> List Layer -> Layer
-getLayer rank layering =
+getLayer : Int -> RankedLayers -> Layer
+getLayer rank rankedLayers =
     let
         layer =
-            LE.getAt rank layering
+            IntDict.get rank rankedLayers
     in
-    Maybe.withDefault [] layer
+    Maybe.withDefault
+        { nodes = []
+        , incomingEdges = []
+        , outgoingEdges = []
+        }
+        layer
 
 
 isDummyNode : G.NodeId -> G.NodeId -> Bool

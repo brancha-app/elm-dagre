@@ -1,7 +1,7 @@
 module Dagre.Order.Init exposing (initOrder)
 
 import Dagre.Utils as DU
-import List
+import IntDict
 
 
 
@@ -10,6 +10,6 @@ import List
 -}
 
 
-initOrder : List DU.Layer -> List DU.Layer
-initOrder layering =
-    List.map List.sort layering
+initOrder : DU.RankedLayers -> DU.RankedLayers
+initOrder rankedLayers =
+    IntDict.map (\_ layer -> { layer | nodes = List.sort layer.nodes }) rankedLayers

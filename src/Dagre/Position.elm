@@ -5,10 +5,11 @@ import Dagre.Position.BK as BK exposing (NodePointDict)
 import Dagre.Utils as DU
 import Dict exposing (Dict)
 import Graph as G
+import IntDict
 import List.Extra as LE
 
 
-positionY : DA.Config -> List DU.Layer -> NodePointDict
+positionY : DA.Config -> List DU.OldLayer -> NodePointDict
 positionY config rankList =
     let
         ys =
@@ -26,7 +27,7 @@ positionY config rankList =
 -}
 
 
-assignAbsoluteY : DA.Config -> DU.Layer -> ( Float, NodePointDict ) -> ( Float, NodePointDict )
+assignAbsoluteY : DA.Config -> DU.OldLayer -> ( Float, NodePointDict ) -> ( Float, NodePointDict )
 assignAbsoluteY config l ( currentY, ys ) =
     let
         getHeight =
@@ -74,9 +75,14 @@ combinePoints xs ys =
     Dict.merge onlyX bothXY onlyY xs ys Dict.empty
 
 
-position : DA.Config -> G.Graph n e -> ( List DU.Layer, List DU.Edge ) -> ( Dict G.NodeId DU.Coordinates, ( Float, Float ) )
-position config g ( rankList, edges ) =
+position : DA.Config -> G.Graph n e -> ( DU.RankedLayers, List DU.Edge ) -> ( Dict G.NodeId DU.Coordinates, ( Float, Float ) )
+position config g ( rankedLayers, edges ) =
     let
+        rankList =
+            IntDict.toList rankedLayers
+                |> List.sortBy Tuple.first
+                |> List.map (Tuple.second >> .nodes)
+
         adjustedConfig =
             if config.rankDir == LR || config.rankDir == RL then
                 { config

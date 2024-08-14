@@ -4,7 +4,6 @@ import Dagre.Utils as DU
 import Dict exposing (Dict)
 import Graph as G
 import IntDict exposing (IntDict)
-import List.Extra as LE
 
 
 
@@ -22,8 +21,8 @@ import List.Extra as LE
 -}
 
 
-addDummyNodesAndSplitEdges : Maybe G.NodeId -> ( List DU.Layer, List DU.Edge ) -> ( ( List DU.Layer, List DU.Edge ), Dict DU.Edge (List G.NodeId) )
-addDummyNodesAndSplitEdges maybeInitDummyNodeId ( rankLayers, edges ) =
+addDummyNodesAndSplitEdges : Maybe G.NodeId -> ( DU.RankedLayers, List DU.Edge ) -> ( ( DU.RankedLayers, List DU.Edge ), Dict DU.Edge (List G.NodeId) )
+addDummyNodesAndSplitEdges maybeInitDummyNodeId ( rankedLayers, edges ) =
     let
         initDummyId =
             case maybeInitDummyNodeId of
@@ -31,7 +30,7 @@ addDummyNodesAndSplitEdges maybeInitDummyNodeId ( rankLayers, edges ) =
                     x
 
                 Nothing ->
-                    case List.concat rankLayers |> List.maximum of
+                    case IntDict.values rankedLayers |> List.map .nodes |> List.concat |> List.maximum of
                         Just x ->
                             x + 1
 
@@ -39,16 +38,19 @@ addDummyNodesAndSplitEdges maybeInitDummyNodeId ( rankLayers, edges ) =
                             1
 
         nodeRankDict =
-            DU.getNodeRankDict rankLayers
+            DU.getNodeRankDict rankedLayers
 
         initControlPoints =
             Dict.fromList <| List.map (\e -> ( e, [] )) edges
 
-        ( ( newRankLayers, _ ), ( newEdges, newControlPoints ) ) =
+        ( newRankLayers, _, newControlPoints ) =
             List.foldl
                 (checkAndSplitMultiSpanEdge nodeRankDict)
-                ( ( rankLayers, initDummyId ), ( edges, initControlPoints ) )
+                ( rankedLayers, initDummyId, initControlPoints )
                 edges
+
+        newEdges =
+            List.concat (IntDict.values newRankLayers |> List.map .outgoingEdges)
     in
     ( ( newRankLayers, newEdges ), newControlPoints )
 
@@ -65,8 +67,8 @@ addDummyNodesAndSplitEdges maybeInitDummyNodeId ( rankLayers, edges ) =
 -}
 
 
-checkAndSplitMultiSpanEdge : IntDict Int -> DU.Edge -> ( ( List DU.Layer, G.NodeId ), ( List DU.Edge, Dict DU.Edge (List G.NodeId) ) ) -> ( ( List DU.Layer, G.NodeId ), ( List DU.Edge, Dict DU.Edge (List G.NodeId) ) )
-checkAndSplitMultiSpanEdge nodeRankDict ( from, to ) ( ( rankLayers, dummyId ), ( edges, controlPoints ) ) =
+checkAndSplitMultiSpanEdge : IntDict Int -> DU.Edge -> ( DU.RankedLayers, G.NodeId, Dict DU.Edge (List G.NodeId) ) -> ( DU.RankedLayers, G.NodeId, Dict DU.Edge (List G.NodeId) )
+checkAndSplitMultiSpanEdge nodeRankDict ( from, to ) ( rankedLayers, dummyId, controlPoints ) =
     let
         ( fromRank, toRank ) =
             ( DU.getRank from nodeRankDict, DU.getRank to nodeRankDict )
@@ -79,19 +81,16 @@ checkAndSplitMultiSpanEdge nodeRankDict ( from, to ) ( ( rankLayers, dummyId ), 
             dummyNodes =
                 List.range dummyId (newDummyId - 1)
 
-            newEdges =
-                splitEdgeAndUpdateEdges ( from, to ) dummyNodes edges
+            newRankedLayers =
+                splitEdgeAndUpdateRankedLayers ( from, to ) ( fromRank, toRank ) dummyNodes rankedLayers
 
             newControlPoints =
                 Dict.update ( from, to ) (Maybe.map (\_ -> dummyNodes)) controlPoints
-
-            newRankLayers =
-                insertKNodesIntoKSubsequentLayers rankLayers (fromRank + 1) dummyNodes
         in
-        ( ( newRankLayers, newDummyId ), ( newEdges, newControlPoints ) )
+        ( newRankedLayers, newDummyId, newControlPoints )
 
     else
-        ( ( rankLayers, dummyId ), ( edges, controlPoints ) )
+        ( rankedLayers, dummyId, controlPoints )
 
 
 
@@ -100,19 +99,32 @@ checkAndSplitMultiSpanEdge nodeRankDict ( from, to ) ( ( rankLayers, dummyId ), 
 -}
 
 
-splitEdgeAndUpdateEdges : DU.Edge -> List G.NodeId -> List DU.Edge -> List DU.Edge
-splitEdgeAndUpdateEdges ( from, to ) dummyNodes edges =
+splitEdgeAndUpdateRankedLayers : DU.Edge -> ( Int, Int ) -> List G.NodeId -> DU.RankedLayers -> DU.RankedLayers
+splitEdgeAndUpdateRankedLayers ( from, to ) ( fromRank, toRank ) dummyNodes rankedLayers =
     let
-        removedFromEdges =
-            LE.remove ( from, to ) edges
+        updateFromLayer =
+            IntDict.update fromRank (Maybe.map (\layer -> { layer | outgoingEdges = List.filter ((/=) ( from, to )) layer.outgoingEdges })) rankedLayers
 
-        splitPath =
-            List.concat [ [ from ], dummyNodes, [ to ] ]
+        updateToLayer =
+            IntDict.update toRank (Maybe.map (\layer -> { layer | incomingEdges = List.filter ((/=) ( from, to )) layer.incomingEdges })) updateFromLayer
 
-        splitEdges =
-            DU.getEdgesFromPath splitPath
+        ( fromNodes, currentNodes, toNodes ) =
+            let
+                justDummyNodes =
+                    List.map Just dummyNodes
+            in
+            ( List.concat [ [ Nothing ], [ Just from ], justDummyNodes ]
+            , List.concat [ [ from ], dummyNodes, [ to ] ]
+            , List.concat [ justDummyNodes, [ Just to ], [ Nothing ] ]
+            )
+
+        affectedRanks =
+            List.range fromRank toRank
+
+        addToLayers =
+            List.map4 modifyLayer fromNodes currentNodes toNodes affectedRanks
     in
-    List.append removedFromEdges splitEdges
+    List.foldl (\( rank, addToLayer ) layers -> IntDict.update rank (Maybe.map (insertKNodesIntoKSubsequentLayersWithEdges addToLayer)) layers) updateToLayer addToLayers
 
 
 
@@ -124,11 +136,48 @@ splitEdgeAndUpdateEdges ( from, to ) dummyNodes edges =
 -}
 
 
-insertKNodesIntoKSubsequentLayers : List DU.Layer -> Int -> List G.NodeId -> List DU.Layer
-insertKNodesIntoKSubsequentLayers rankLayers startRank dummyNodes =
-    LE.indexedFoldl
-        (\p e layers ->
-            LE.updateAt (startRank + p) (\layer -> List.append layer [ e ]) layers
-        )
-        rankLayers
-        dummyNodes
+insertKNodesIntoKSubsequentLayersWithEdges : AddToLayer -> DU.Layer -> DU.Layer
+insertKNodesIntoKSubsequentLayersWithEdges addToLayer layer =
+    let
+        newNodes =
+            case addToLayer.node of
+                Just x ->
+                    List.append layer.nodes [ x ]
+
+                Nothing ->
+                    layer.nodes
+
+        newIncomingEdges =
+            case addToLayer.incoming of
+                Just incomingEdge ->
+                    List.append layer.incomingEdges [ incomingEdge ]
+
+                Nothing ->
+                    layer.incomingEdges
+
+        newOutgoingEdges =
+            case addToLayer.outgoing of
+                Just outgoingEdge ->
+                    List.append layer.outgoingEdges [ outgoingEdge ]
+
+                Nothing ->
+                    layer.outgoingEdges
+    in
+    { layer | nodes = newNodes, incomingEdges = newIncomingEdges, outgoingEdges = newOutgoingEdges }
+
+
+type alias AddToLayer =
+    { node : Maybe G.NodeId
+    , incoming : Maybe DU.Edge
+    , outgoing : Maybe DU.Edge
+    }
+
+
+modifyLayer : Maybe G.NodeId -> G.NodeId -> Maybe G.NodeId -> Int -> ( Int, AddToLayer )
+modifyLayer maybeFromNode currentNode maybeToNode rank =
+    ( rank
+    , { node = Maybe.andThen (\_ -> Maybe.andThen (\_ -> Just currentNode) maybeToNode) maybeFromNode
+      , incoming = Maybe.andThen (\fromNode -> Just ( fromNode, currentNode )) maybeFromNode
+      , outgoing = Maybe.andThen (\toNode -> Just ( currentNode, toNode )) maybeToNode
+      }
+    )
