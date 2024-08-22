@@ -40,7 +40,7 @@ vertexOrder layering =
             DOH.optimizeOrderingViaHeuristic layering ( 0, 24, 0 ) initBest initNodeOrderDict
 
         finalRankedLayers =
-            IntDict.map (\_ layer -> { layer | nodes = List.sortBy (\node -> DU.getOrder finalBestOrdering node) layer.nodes }) layering
+            DU.syncRankedLayersWithNodeOrderDict layering finalBestOrdering
     in
     finalRankedLayers
 

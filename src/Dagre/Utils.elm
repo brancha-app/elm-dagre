@@ -180,6 +180,13 @@ getOrder nodeOrderDict nodeId =
             -1
 
 
+syncRankedLayersWithNodeOrderDict : RankedLayers -> NodeOrderDict -> RankedLayers
+syncRankedLayersWithNodeOrderDict rankedLayers nodeOrderDict =
+    IntDict.map
+        (\_ layer -> { layer | nodes = List.sortBy (\node -> getOrder nodeOrderDict node) layer.nodes })
+        rankedLayers
+
+
 getOrderOldLayer : OldLayer -> G.NodeId -> Int
 getOrderOldLayer l nodeId =
     case LE.elemIndex nodeId l of
