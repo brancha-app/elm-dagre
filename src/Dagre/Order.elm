@@ -1,9 +1,8 @@
 module Dagre.Order exposing (vertexOrder)
 
-import Dagre.Order.Barycenter as DOB
 import Dagre.Order.CrossCount as DOC
+import Dagre.Order.Heuristic as DOH
 import Dagre.Order.Init as DOI
-import Dagre.Order.Transpose as DOT
 import Dagre.Utils as DU
 import IntDict
 
@@ -12,10 +11,12 @@ import IntDict
 {-
    This function returns the updated rankList such that, it minimizes the edge
    crossings between the layers.
-   This algorithm is taken from Gansner, et al., (1993) : "A Technique for Drawing Directed Graphs."
-   For debugging and reference visit DagreJS implementation (commit with SHA-id '6355259')
-   TODO : implement the  Jünger and Mutzel,
-        "2-DU.Layer Straightline Crossing Minimization", It improves time complexity
+   This algorithm is taken from GraphViz implementation of crossing reduction algorithm.
+
+    This algorithm is presented in the following paper:
+        A method for drawing directed graphs - dot's algorithm (1993)
+        [TSE93.pdf](https://graphviz.org/documentation/TSE93.pdf)
+
 
 -}
 
@@ -23,64 +24,46 @@ import IntDict
 vertexOrder : DU.RankedLayers -> DU.RankedLayers
 vertexOrder layering =
     let
-        initLayering =
+        initNodeOrderDict =
             DOI.initOrder layering
 
         bestCC =
-            DOC.crossCount initLayering
+            DOC.crossCount layering initNodeOrderDict
+
+        initBest : DOH.Best
+        initBest =
+            { nodeOrderDict = initNodeOrderDict
+            , crossCount = bestCC
+            }
+
+        finalBestOrdering =
+            DOH.optimizeOrderingViaHeuristic layering ( 0, 24, 0 ) initBest initNodeOrderDict
+
+        finalRankedLayers =
+            IntDict.map (\_ layer -> { layer | nodes = List.sortBy (\node -> DU.getOrder finalBestOrdering node) layer.nodes }) layering
     in
-    optimizeOrdering initLayering bestCC ( 0, 0 )
+    finalRankedLayers
 
 
 
-{-
-   The main loop that minimizes the crossing reductions
--}
-
-
-optimizeOrdering : DU.RankedLayers -> Int -> ( Int, Int ) -> DU.RankedLayers
-optimizeOrdering layering bestCC ( iter, lastBest ) =
-    if lastBest < 3 then
-        let
-            newLayering =
-                sweepLayers layering iter
-
-            newTransposedLayering =
-                DOT.transpose newLayering
-
-            newCC =
-                DOC.crossCount newTransposedLayering
-        in
-        if newCC < bestCC then
-            optimizeOrdering newTransposedLayering newCC ( iter + 1, 0 )
-
-        else
-            optimizeOrdering layering bestCC ( iter + 1, lastBest + 1 )
-
-    else
-        layering
-
-
-
-{-
-   sorts Layers from top to bottom or bottom to top based on Barycenter values
--}
-
-
-sweepLayers : DU.RankedLayers -> Int -> DU.RankedLayers
-sweepLayers rankedLayers iter =
-    let
-        maxRank =
-            (IntDict.keys rankedLayers
-                |> List.maximum
-                |> Maybe.withDefault 0
-            )
-                - 1
-    in
-    if modBy 2 iter == 0 then
-        -- Applies BarryCenter Heuristic from layer 1 (0 based index) to Last layer
-        List.foldl (DOB.barycenter DOB.PreviousLayer) rankedLayers (List.range 1 maxRank)
-
-    else
-        -- Applies BarryCenter Heuristic from 2nd last layer to 0th layer
-        List.foldl (DOB.barycenter DOB.NextLayer) rankedLayers (List.range 0 (maxRank - 1) |> List.reverse)
+-- TODO
+-- 1. Initialise the ranking of nodes using BFS as in GraphViz
+-- 2. Implement pass logic to apply heuristics to reduce edge crossings
+--     Search for this line in lib/dotgen/mincross.c -> mincross() function 'for (pass = startpass; pass <= endpass; pass++) {'
+--
+--
+-- {- 	install nodes in ranks. the initial ordering ensure that series-parallel
+--    graphs such as trees are drawn with no crossings.  it tries searching
+--    in- and out-edges and takes the better of the two initial orderings.
+--    Taken from GraphViz implementation
+-- -}
+-- buildRanks : DU.RankedLayers -> Neighbours -> DU.NodeOrderDict
+-- buildRanks layering along =
+--     let
+--         initNodeOrderDict =
+--             DOI.initOrder layering
+--     in
+--     initNodeOrderDict
+-- type Neighbours
+--     = AlongOutgoingEdges
+--     | AlongIncomingEdges

@@ -10,6 +10,13 @@ import IntDict
 -}
 
 
-initOrder : DU.RankedLayers -> DU.RankedLayers
+initOrder : DU.RankedLayers -> DU.NodeOrderDict
 initOrder rankedLayers =
-    IntDict.map (\_ layer -> { layer | nodes = List.sort layer.nodes }) rankedLayers
+    IntDict.foldl
+        (\_ layer nodeOrderDict ->
+            List.sort layer.nodes
+                |> List.indexedMap Tuple.pair
+                |> List.foldl (\( order, node ) nodeOrders -> IntDict.insert node order nodeOrders) nodeOrderDict
+        )
+        IntDict.empty
+        rankedLayers

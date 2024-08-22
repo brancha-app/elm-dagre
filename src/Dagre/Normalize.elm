@@ -50,7 +50,7 @@ addDummyNodesAndSplitEdges maybeInitDummyNodeId ( rankedLayers, edges ) =
                 edges
 
         newEdges =
-            List.concat (IntDict.values newRankLayers |> List.map .outgoingEdges)
+            List.concat (IntDict.values newRankLayers |> List.map DU.allOutGoingEdges)
     in
     ( ( newRankLayers, newEdges ), newControlPoints )
 
@@ -103,10 +103,10 @@ splitEdgeAndUpdateRankedLayers : DU.Edge -> ( Int, Int ) -> List G.NodeId -> DU.
 splitEdgeAndUpdateRankedLayers ( from, to ) ( fromRank, toRank ) dummyNodes rankedLayers =
     let
         updateFromLayer =
-            IntDict.update fromRank (Maybe.map (\layer -> { layer | outgoingEdges = List.filter ((/=) ( from, to )) layer.outgoingEdges })) rankedLayers
+            IntDict.update fromRank (Maybe.map (\layer -> { layer | outgoingEdges = IntDict.update from (Maybe.map (List.filter ((/=) to))) layer.outgoingEdges })) rankedLayers
 
         updateToLayer =
-            IntDict.update toRank (Maybe.map (\layer -> { layer | incomingEdges = List.filter ((/=) ( from, to )) layer.incomingEdges })) updateFromLayer
+            IntDict.update toRank (Maybe.map (\layer -> { layer | incomingEdges = IntDict.update to (Maybe.map (List.filter ((/=) from))) layer.incomingEdges })) updateFromLayer
 
         ( fromNodes, currentNodes, toNodes ) =
             let
@@ -149,16 +149,26 @@ insertKNodesIntoKSubsequentLayersWithEdges addToLayer layer =
 
         newIncomingEdges =
             case addToLayer.incoming of
-                Just incomingEdge ->
-                    List.append layer.incomingEdges [ incomingEdge ]
+                Just ( from, to ) ->
+                    case IntDict.get to layer.incomingEdges of
+                        Just _ ->
+                            IntDict.update to (Maybe.map (\froms -> List.append froms [ from ])) layer.incomingEdges
+
+                        Nothing ->
+                            IntDict.insert to [ from ] layer.incomingEdges
 
                 Nothing ->
                     layer.incomingEdges
 
         newOutgoingEdges =
             case addToLayer.outgoing of
-                Just outgoingEdge ->
-                    List.append layer.outgoingEdges [ outgoingEdge ]
+                Just ( from, to ) ->
+                    case IntDict.get from layer.outgoingEdges of
+                        Just _ ->
+                            IntDict.update from (Maybe.map (\tos -> List.append tos [ to ])) layer.outgoingEdges
+
+                        Nothing ->
+                            IntDict.insert from [ to ] layer.outgoingEdges
 
                 Nothing ->
                     layer.outgoingEdges

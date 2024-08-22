@@ -1,6 +1,7 @@
-module Dagre.Order.CrossCount exposing (crossCount)
+module Dagre.Order.CrossCount exposing (crossCount, transposeCrossCount)
 
 import Dagre.Utils as DU
+import Graph
 import IntDict
 import List.Extra as LE
 
@@ -8,17 +9,18 @@ import List.Extra as LE
 
 {-
    Comparator Lexicographical Sorting of Edges
+   This function is used to sort edges based on the order of their north end, followed by south end
 -}
 
 
-lexSortEdge : ( Int, Int ) -> ( Int, Int ) -> Order
-lexSortEdge ( f1, t1 ) ( f2, t2 ) =
-    case compare f1 f2 of
+lexSortEdge : DU.OrderedEdge -> DU.OrderedEdge -> Order
+lexSortEdge ( e1NorthOrder, e1SouthOrder ) ( e2NorthOrder, e2SouthOrder ) =
+    case compare e1NorthOrder e2NorthOrder of
         LT ->
             LT
 
         EQ ->
-            compare t1 t2
+            compare e1SouthOrder e2SouthOrder
 
         GT ->
             GT
@@ -30,20 +32,18 @@ lexSortEdge ( f1, t1 ) ( f2, t2 ) =
    and returns the south end of the layers sorted Lexicographically
    For example
 
-   Note the edges passed to this function must be directed only
-   from layer 1 to layer 2, and no edges should that do not have both ends in
-   l1, and l2 must not be passed
+
 -}
 
 
-mapAndSortEdges : ( DU.Layer, DU.Layer ) -> List DU.Edge -> List Int
-mapAndSortEdges ( l1, l2 ) edges =
+mapEdgesToSouthernSequence : DU.NodeOrderDict -> List DU.Edge -> List Int
+mapEdgesToSouthernSequence nodeOrderDict edges =
     let
-        mappedEdges =
-            List.map (DU.mapEdgeToOrder ( l1, l2 )) edges
+        orderedEdges =
+            List.map (DU.mapEdgeToOrder nodeOrderDict) edges
 
         sortedEdges =
-            List.sortWith lexSortEdge mappedEdges
+            List.sortWith lexSortEdge orderedEdges
 
         southernPoints =
             List.map (\( _, to ) -> to) sortedEdges
@@ -91,7 +91,9 @@ insertionSortWithInversionAccumulator nodes =
 
 
 {-
-   BiLayer CrossCount : Returns number of crossing's between two layers
+   BiLayer CrossCount : Returns number of crossing's between two layers.
+   The functions counts the edge crossing between the given North Layer and the upcoming South Layer.
+   It considers the outgoing edges from the given North Layer to the South Layer.
    The inversion count algorithm is the naive algorithm decribed in
    Barth, et al. "Simple and Efficient Bilayer Cross Counting"
    I still need to implement the efficient algorithm proposed in paper
@@ -101,14 +103,14 @@ insertionSortWithInversionAccumulator nodes =
 -}
 
 
-biLayerCrossCount : ( DU.Layer, DU.Layer ) -> Int
-biLayerCrossCount ( l1, l2 ) =
+biLayerCrossCount : DU.Layer -> DU.NodeOrderDict -> Int
+biLayerCrossCount northLayer nodeOrderDict =
     let
         reqEdges =
-            l1.outgoingEdges
+            DU.allOutGoingEdges northLayer
 
         reqSouthernPoints =
-            mapAndSortEdges ( l1, l2 ) reqEdges
+            mapEdgesToSouthernSequence nodeOrderDict reqEdges
 
         ( totalCrossings, _ ) =
             insertionSortWithInversionAccumulator reqSouthernPoints
@@ -120,24 +122,79 @@ biLayerCrossCount ( l1, l2 ) =
 {- counts Crossing edges for a rank list -}
 
 
-crossCount : DU.RankedLayers -> Int
-crossCount rankedLayers =
+crossCount : DU.RankedLayers -> DU.NodeOrderDict -> Int
+crossCount rankedLayers nodeOrderDict =
     let
-        ( minRank, maxRank ) =
-            IntDict.keys rankedLayers
-                |> (\ranks -> ( List.minimum ranks, List.maximum ranks ))
-                |> (\( maybeMin, maybeMax ) -> ( Maybe.withDefault 0 maybeMin, Maybe.withDefault 0 maybeMax ))
-
-        fromLayers =
-            List.range minRank (maxRank - 1)
-
-        toLayers =
-            List.range (minRank + 1) maxRank
-
-        adjacentLayers =
-            List.map2 (\l1 l2 -> ( DU.getLayer l1 rankedLayers, DU.getLayer l2 rankedLayers )) fromLayers toLayers
+        layeredCrossCounts =
+            IntDict.map (\_ layer -> biLayerCrossCount layer nodeOrderDict) rankedLayers
 
         cc =
-            List.map biLayerCrossCount adjacentLayers |> List.foldl (+) 0
+            IntDict.foldl (\_ layerCC totalCrossings -> layerCC + totalCrossings) 0 layeredCrossCounts
     in
     cc
+
+
+
+--  Useful for Counting Crossings for applying Transpose Heuristic
+{- counts crossing between two adjacent nodes efficiently -}
+
+
+countCrossingsForSingleEdge : List DU.Order -> DU.Order -> Int
+countCrossingsForSingleEdge preceedingEdgesOrder endPointOrder =
+    List.foldl
+        (\otherEdgeOrder totalCrossings ->
+            if otherEdgeOrder > endPointOrder then
+                totalCrossings + 1
+
+            else
+                totalCrossings
+        )
+        0
+        preceedingEdgesOrder
+
+
+countCrossingsForAllEdges : List DU.Order -> List DU.Order -> Int
+countCrossingsForAllEdges preceedingEdgesOrder endPointOrders =
+    List.foldl (\endPointOrder totalCrossings -> totalCrossings + countCrossingsForSingleEdge preceedingEdgesOrder endPointOrder) 0 endPointOrders
+
+
+
+{- efficiently counts the number of crossings between two nodes, when they are adjacent
+
+-}
+
+
+transposeCrossCount : Graph.NodeId -> Graph.NodeId -> DU.Layer -> DU.NodeOrderDict -> Int
+transposeCrossCount leftNode rightNode layer nodeOrderDict =
+    let
+        northernSequenceForIncomingEdgesSorted nodeId =
+            IntDict.get nodeId layer.incomingEdges
+                |> Maybe.withDefault []
+                |> List.map (DU.getOrder nodeOrderDict)
+                |> List.sort
+
+        southernSequenceForOutgoingEdgesSorted nodeId =
+            IntDict.get nodeId layer.outgoingEdges
+                |> Maybe.withDefault []
+                |> List.map (DU.getOrder nodeOrderDict)
+                |> List.sort
+
+        northernSeqLeftNode =
+            northernSequenceForIncomingEdgesSorted leftNode
+
+        northernSeqRightNode =
+            northernSequenceForIncomingEdgesSorted rightNode
+
+        southernSeqLeftNode =
+            southernSequenceForOutgoingEdgesSorted leftNode
+
+        southernSeqRightNode =
+            southernSequenceForOutgoingEdgesSorted rightNode
+
+        inCrossings =
+            countCrossingsForAllEdges northernSeqLeftNode northernSeqRightNode
+
+        outCrossings =
+            countCrossingsForAllEdges southernSeqLeftNode southernSeqRightNode
+    in
+    inCrossings + outCrossings

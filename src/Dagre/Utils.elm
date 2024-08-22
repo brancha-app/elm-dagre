@@ -28,10 +28,14 @@ type alias Edge =
     ( G.NodeId, G.NodeId )
 
 
+type alias Adjacency =
+    IntDict (List G.NodeId)
+
+
 type alias Layer =
     { nodes : List G.NodeId
-    , incomingEdges : List Edge
-    , outgoingEdges : List Edge
+    , incomingEdges : Adjacency -- key is to node, value is list of from nodes (to node belongs to this layer)
+    , outgoingEdges : Adjacency -- key is from node, value is list of to nodes (from node belongs to this layer)
     }
 
 
@@ -41,6 +45,36 @@ type alias OldLayer =
 
 type alias RankedLayers =
     IntDict Layer
+
+
+type alias Order =
+    Int
+
+
+type alias NodeOrderDict =
+    IntDict Order
+
+
+type alias OrderedEdge =
+    ( Order, Order )
+
+
+type alias NodeWithHeuristicValue =
+    { id : G.NodeId, heuristicValue : Float }
+
+
+
+{-
+   Calculates the heuristic value for a node based on its adjacent nodes and current nodeOrderDict
+-}
+
+
+type alias Heuristic =
+    { id : G.NodeId
+    , adjacentNodes : List G.NodeId
+    , nodeOrderDict : NodeOrderDict
+    }
+    -> NodeWithHeuristicValue
 
 
 type EdgeType
@@ -136,9 +170,9 @@ getEdgesFromPath path =
 -}
 
 
-getOrder : Layer -> G.NodeId -> Int
-getOrder l nodeId =
-    case LE.elemIndex nodeId l.nodes of
+getOrder : NodeOrderDict -> G.NodeId -> Int
+getOrder nodeOrderDict nodeId =
+    case IntDict.get nodeId nodeOrderDict of
         Just idx ->
             idx
 
@@ -156,9 +190,9 @@ getOrderOldLayer l nodeId =
             -1
 
 
-mapEdgeToOrder : ( Layer, Layer ) -> Edge -> Edge
-mapEdgeToOrder ( l1, l2 ) e =
-    Tuple.mapBoth (getOrder l1) (getOrder l2) e
+mapEdgeToOrder : NodeOrderDict -> Edge -> OrderedEdge
+mapEdgeToOrder nodeOrderDict e =
+    Tuple.mapBoth (getOrder nodeOrderDict) (getOrder nodeOrderDict) e
 
 
 mapEdgeToOrderOldLayer : ( OldLayer, OldLayer ) -> Edge -> Edge
@@ -193,7 +227,7 @@ mapEdgeWithTypeToNodes ( l1, l2 ) e =
 
 getEdgesDirectedFromLayers : ( Layer, Layer ) -> List Edge
 getEdgesDirectedFromLayers ( l1, l2 ) =
-    l1.outgoingEdges
+    allOutGoingEdges l1
 
 
 getEdgesWithTypeDirectedFromLayers : ( OldLayer, OldLayer ) -> List EdgeWithType -> List EdgeWithType
@@ -221,10 +255,24 @@ getLayer rank rankedLayers =
     in
     Maybe.withDefault
         { nodes = []
-        , incomingEdges = []
-        , outgoingEdges = []
+        , incomingEdges = IntDict.empty
+        , outgoingEdges = IntDict.empty
         }
         layer
+
+
+allOutGoingEdges : Layer -> List Edge
+allOutGoingEdges layer =
+    IntDict.toList layer.outgoingEdges
+        |> List.map (\( from, tos ) -> List.map (\to -> ( from, to )) tos)
+        |> List.concat
+
+
+allInComingEdges : Layer -> List Edge
+allInComingEdges layer =
+    IntDict.toList layer.incomingEdges
+        |> List.map (\( to, froms ) -> List.map (\from -> ( from, to )) froms)
+        |> List.concat
 
 
 isDummyNode : G.NodeId -> G.NodeId -> Bool

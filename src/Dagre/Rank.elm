@@ -33,8 +33,8 @@ assignRanks g =
         toLayer : List (G.NodeContext n e) -> DU.Layer
         toLayer nodes =
             { nodes = List.map (.node >> .id) nodes
-            , incomingEdges = List.foldl (\nodeCtx inEdges -> List.append (DU.fromIncoming nodeCtx.incoming nodeCtx.node.id) inEdges) [] nodes
-            , outgoingEdges = List.foldl (\nodeCtx outEdges -> List.append (DU.fromOutgoing nodeCtx.outgoing nodeCtx.node.id) outEdges) [] nodes
+            , incomingEdges = List.foldl (\nodeCtx inEdges -> IntDict.insert nodeCtx.node.id (IntDict.keys nodeCtx.incoming) inEdges) IntDict.empty nodes
+            , outgoingEdges = List.foldl (\nodeCtx outEdges -> IntDict.insert nodeCtx.node.id (IntDict.keys nodeCtx.outgoing) outEdges) IntDict.empty nodes
             }
     in
     heightLevels
