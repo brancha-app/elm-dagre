@@ -60,7 +60,7 @@ type alias OrderedEdge =
 
 
 type alias NodeWithHeuristicValue =
-    { id : G.NodeId, heuristicValue : Float }
+    { id : G.NodeId, heuristicValue : Maybe Float }
 
 
 

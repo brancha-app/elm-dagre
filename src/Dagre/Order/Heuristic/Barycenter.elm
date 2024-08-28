@@ -23,13 +23,9 @@ barycenter { id, adjacentNodes, nodeOrderDict } =
     let
         adj_positions =
             List.map (DU.getOrder nodeOrderDict) adjacentNodes
-
-        -- Possible Future Bug : check if any -1 are there, as this can be introduce a
-        -- possible error in barycenter value, finally a bug in crossing
-        -- minimization algorithm
     in
     if List.isEmpty adj_positions then
-        { id = id, heuristicValue = -1 }
+        { id = id, heuristicValue = Nothing }
 
     else
-        { id = id, heuristicValue = toFloat (List.sum adj_positions) / toFloat (List.length adj_positions) }
+        { id = id, heuristicValue = Just <| toFloat (List.sum adj_positions) / toFloat (List.length adj_positions) }

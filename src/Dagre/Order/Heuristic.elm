@@ -1,4 +1,4 @@
-module Dagre.Order.Heuristic exposing (..)
+module Dagre.Order.Heuristic exposing (Best, optimizeOrderingViaHeuristic)
 
 import Dagre.Order.CrossCount as DOC
 import Dagre.Order.Heuristic.Barycenter as DOHB
@@ -133,8 +133,25 @@ apply heuristic fixedLayer reverse layer nodeOrderDict =
                         )
                         layer.nodes
 
+        needReordering =
+            List.filterMap
+                (\{ id, heuristicValue } ->
+                    case heuristicValue of
+                        Just value ->
+                            Just { id = id, heuristicValue = value }
+
+                        Nothing ->
+                            Nothing
+                )
+                heuristicValues
+
+        availableOrders =
+            List.map (\{ id } -> DU.getOrder nodeOrderDict id) needReordering
+                |> List.sort
+
         newOrder =
-            List.sortWith (compareHeuristicValues nodeOrderDict reverse) heuristicValues |> List.indexedMap (\idx { id } -> ( id, idx ))
+            List.sortWith (compareHeuristicValues nodeOrderDict reverse) needReordering
+                |> List.map2 (\order { id } -> ( id, order )) availableOrders
     in
     List.foldl (\( nodeId, order ) nodeOrdDict -> IntDict.insert nodeId order nodeOrdDict) nodeOrderDict newOrder
 
@@ -150,7 +167,7 @@ apply heuristic fixedLayer reverse layer nodeOrderDict =
 -}
 
 
-compareHeuristicValues : DU.NodeOrderDict -> Bool -> DU.NodeWithHeuristicValue -> DU.NodeWithHeuristicValue -> Order
+compareHeuristicValues : DU.NodeOrderDict -> Bool -> NodeAndHeuristicValue -> NodeAndHeuristicValue -> Order
 compareHeuristicValues nodeOrderDict reverse a b =
     case compare a.heuristicValue b.heuristicValue of
         LT ->
@@ -183,6 +200,10 @@ type alias Best =
     { crossCount : Int
     , nodeOrderDict : DU.NodeOrderDict
     }
+
+
+type alias NodeAndHeuristicValue =
+    { id : Graph.NodeId, heuristicValue : Float }
 
 
 
