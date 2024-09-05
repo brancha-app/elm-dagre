@@ -28,8 +28,35 @@ type alias Edge =
     ( G.NodeId, G.NodeId )
 
 
+
+{- This type represents a node with rank information -}
+
+
+type alias RankedNode =
+    { id : G.NodeId, rank : Int }
+
+
+
+{- This type represents the other node of an edge
+   This is used for generating initial orderings of nodes in each layer using BFS
+-}
+
+
+type alias OtherNodeOfEdge =
+    { otherNode : G.NodeId
+    , edge : { from : RankedNode, to : RankedNode } -- original from and to nodes of the edge
+    }
+
+
+
+{- This adjacency type is similar to Graph.Adjacency but it stores the current layers node as the key
+   and the list of other nodes of the edge as the value, along with the original edge
+   if the edge is real edge (short edge) then from and to nodes are original from and to within G.Edge
+-}
+
+
 type alias Adjacency =
-    IntDict (List G.NodeId)
+    IntDict (List OtherNodeOfEdge)
 
 
 type alias Layer =
@@ -88,6 +115,49 @@ type alias EdgeWithType =
 
 type alias NeighbourFn =
     G.NodeId -> List G.NodeId
+
+
+type alias RankedNodeInfo =
+    { rank : Int
+    , priority : Maybe Int
+    }
+
+
+
+{- This type stores the ranked information about original from and to nodes of an edge
+   if the edge is real edge (short edge) then from and to nodes are original from and to withing G.Edge
+   if the edge is a long edge, then from and to nodes are the nodes of the original edge
+-}
+
+
+type alias OriginalEdgeInfo =
+    { from : G.Node RankedNodeInfo
+    , to : G.Node RankedNodeInfo
+    }
+
+
+
+{- This represents a graph with nodes having rank information
+   along with priority and edges information
+   This is used for partitioning the graph into connected components for minimizing crossings
+   This graph also helps in generating initial orderings of nodes in each layer using BFS
+-}
+
+
+type alias RankedGraph =
+    G.Graph RankedNodeInfo OriginalEdgeInfo
+
+
+type alias ConnectedComponent =
+    { roots :
+        -- root nodes of the connected component
+        { noIncomingEdges : List (G.Node RankedNodeInfo) -- List of nodes with no incoming edges
+        , noOutgoingEdges : List (G.Node RankedNodeInfo) -- List of nodes with no outgoing edges
+        }
+    , nodes : List G.NodeId -- List of all nodes in the connected component (including root nodes)
+    , size : Int -- Number of nodes in the connected component
+    , rankedLayers : RankedLayers
+    }
 
 
 toEdge : G.Edge e -> Edge
@@ -271,15 +341,76 @@ getLayer rank rankedLayers =
 allOutGoingEdges : Layer -> List Edge
 allOutGoingEdges layer =
     IntDict.toList layer.outgoingEdges
-        |> List.map (\( from, tos ) -> List.map (\to -> ( from, to )) tos)
+        |> List.map (\( from, tos ) -> List.map (\{ otherNode } -> ( from, otherNode )) tos)
         |> List.concat
 
 
 allInComingEdges : Layer -> List Edge
 allInComingEdges layer =
     IntDict.toList layer.incomingEdges
-        |> List.map (\( to, froms ) -> List.map (\from -> ( from, to )) froms)
+        |> List.map (\( to, froms ) -> List.map (\{ otherNode } -> ( otherNode, to )) froms)
         |> List.concat
+
+
+
+{- This function turns the rankedLayers into a graph with ranked information
+   This is used for partitioning the graph into connected components for minimizing crossings
+   This graph also helps in generating initial orderings of nodes in each layer using BFS
+-}
+
+
+rankedLayersToGraph : RankedLayers -> RankedGraph
+rankedLayersToGraph rankedLayers =
+    let
+        nodes =
+            IntDict.toList rankedLayers
+                |> List.concatMap
+                    (\( rank, layer ) ->
+                        List.map
+                            (\nodeId ->
+                                G.Node nodeId
+                                    { rank = rank
+                                    , priority = Nothing
+                                    }
+                            )
+                            layer.nodes
+                    )
+
+        allOutGoingEdgesWithRank : Layer -> List ( G.NodeId, OtherNodeOfEdge )
+        allOutGoingEdgesWithRank =
+            \layer ->
+                IntDict.toList layer.outgoingEdges
+                    |> List.map (\( from, tos ) -> List.map (\otherNodeOfEdge -> ( from, otherNodeOfEdge )) tos)
+                    |> List.concat
+
+        mapRankedNodeToRankedNodeInfoNode : RankedNode -> G.Node RankedNodeInfo
+        mapRankedNodeToRankedNodeInfoNode =
+            \node ->
+                G.Node node.id
+                    { rank = node.rank
+                    , priority = Nothing
+                    }
+
+        edges : List (G.Edge OriginalEdgeInfo)
+        edges =
+            IntDict.values rankedLayers
+                |> List.concatMap
+                    (\layer ->
+                        List.map
+                            (\( from, to ) ->
+                                G.Edge from
+                                    to.otherNode
+                                    (OriginalEdgeInfo
+                                        (mapRankedNodeToRankedNodeInfoNode to.edge.from)
+                                        (mapRankedNodeToRankedNodeInfoNode to.edge.to)
+                                    )
+                            )
+                            (allOutGoingEdgesWithRank layer)
+                    )
+    in
+    G.fromNodesAndEdges
+        nodes
+        edges
 
 
 isDummyNode : G.NodeId -> G.NodeId -> Bool

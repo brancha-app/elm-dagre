@@ -103,10 +103,10 @@ splitEdgeAndUpdateRankedLayers : DU.Edge -> ( Int, Int ) -> List G.NodeId -> DU.
 splitEdgeAndUpdateRankedLayers ( from, to ) ( fromRank, toRank ) dummyNodes rankedLayers =
     let
         updateFromLayer =
-            IntDict.update fromRank (Maybe.map (\layer -> { layer | outgoingEdges = IntDict.update from (Maybe.map (List.filter ((/=) to))) layer.outgoingEdges })) rankedLayers
+            IntDict.update fromRank (Maybe.map (\layer -> { layer | outgoingEdges = IntDict.update from (Maybe.map (List.filter (\{ otherNode } -> otherNode /= to))) layer.outgoingEdges })) rankedLayers
 
         updateToLayer =
-            IntDict.update toRank (Maybe.map (\layer -> { layer | incomingEdges = IntDict.update to (Maybe.map (List.filter ((/=) from))) layer.incomingEdges })) updateFromLayer
+            IntDict.update toRank (Maybe.map (\layer -> { layer | incomingEdges = IntDict.update to (Maybe.map (List.filter (\{ otherNode } -> otherNode /= from))) layer.incomingEdges })) updateFromLayer
 
         ( fromNodes, currentNodes, toNodes ) =
             let
@@ -123,8 +123,13 @@ splitEdgeAndUpdateRankedLayers ( from, to ) ( fromRank, toRank ) dummyNodes rank
 
         addToLayers =
             List.map4 modifyLayer fromNodes currentNodes toNodes affectedRanks
+
+        originalEdge =
+            { from = DU.RankedNode from fromRank
+            , to = DU.RankedNode to toRank
+            }
     in
-    List.foldl (\( rank, addToLayer ) layers -> IntDict.update rank (Maybe.map (insertKNodesIntoKSubsequentLayersWithEdges addToLayer)) layers) updateToLayer addToLayers
+    List.foldl (\( rank, addToLayer ) layers -> IntDict.update rank (Maybe.map (insertKNodesIntoKSubsequentLayersWithEdges originalEdge addToLayer)) layers) updateToLayer addToLayers
 
 
 
@@ -136,8 +141,8 @@ splitEdgeAndUpdateRankedLayers ( from, to ) ( fromRank, toRank ) dummyNodes rank
 -}
 
 
-insertKNodesIntoKSubsequentLayersWithEdges : AddToLayer -> DU.Layer -> DU.Layer
-insertKNodesIntoKSubsequentLayersWithEdges addToLayer layer =
+insertKNodesIntoKSubsequentLayersWithEdges : OriginalEdge -> AddToLayer -> DU.Layer -> DU.Layer
+insertKNodesIntoKSubsequentLayersWithEdges originalEdge addToLayer layer =
     let
         newNodes =
             case addToLayer.node of
@@ -152,10 +157,10 @@ insertKNodesIntoKSubsequentLayersWithEdges addToLayer layer =
                 Just ( from, to ) ->
                     case IntDict.get to layer.incomingEdges of
                         Just _ ->
-                            IntDict.update to (Maybe.map (\froms -> List.append froms [ from ])) layer.incomingEdges
+                            IntDict.update to (Maybe.map (\froms -> List.append froms [ DU.OtherNodeOfEdge from originalEdge ])) layer.incomingEdges
 
                         Nothing ->
-                            IntDict.insert to [ from ] layer.incomingEdges
+                            IntDict.insert to [ DU.OtherNodeOfEdge from originalEdge ] layer.incomingEdges
 
                 Nothing ->
                     layer.incomingEdges
@@ -165,10 +170,10 @@ insertKNodesIntoKSubsequentLayersWithEdges addToLayer layer =
                 Just ( from, to ) ->
                     case IntDict.get from layer.outgoingEdges of
                         Just _ ->
-                            IntDict.update from (Maybe.map (\tos -> List.append tos [ to ])) layer.outgoingEdges
+                            IntDict.update from (Maybe.map (\tos -> List.append tos [ DU.OtherNodeOfEdge to originalEdge ])) layer.outgoingEdges
 
                         Nothing ->
-                            IntDict.insert from [ to ] layer.outgoingEdges
+                            IntDict.insert from [ DU.OtherNodeOfEdge to originalEdge ] layer.outgoingEdges
 
                 Nothing ->
                     layer.outgoingEdges
@@ -191,3 +196,9 @@ modifyLayer maybeFromNode currentNode maybeToNode rank =
       , outgoing = Maybe.andThen (\toNode -> Just ( currentNode, toNode )) maybeToNode
       }
     )
+
+
+type alias OriginalEdge =
+    { from : DU.RankedNode
+    , to : DU.RankedNode
+    }

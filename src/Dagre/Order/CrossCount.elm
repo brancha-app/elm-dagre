@@ -170,13 +170,13 @@ transposeCrossCount leftNode rightNode layer nodeOrderDict =
         northernSequenceForIncomingEdgesSorted nodeId =
             IntDict.get nodeId layer.incomingEdges
                 |> Maybe.withDefault []
-                |> List.map (DU.getOrder nodeOrderDict)
+                |> List.map (.otherNode >> DU.getOrder nodeOrderDict)
                 |> List.sort
 
         southernSequenceForOutgoingEdgesSorted nodeId =
             IntDict.get nodeId layer.outgoingEdges
                 |> Maybe.withDefault []
-                |> List.map (DU.getOrder nodeOrderDict)
+                |> List.map (.otherNode >> DU.getOrder nodeOrderDict)
                 |> List.sort
 
         northernSeqLeftNode =

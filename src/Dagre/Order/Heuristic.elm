@@ -1,4 +1,4 @@
-module Dagre.Order.Heuristic exposing (Best, optimizeOrderingViaHeuristic)
+module Dagre.Order.Heuristic exposing (HeuristicAccumulator, NodeOrderWithCrossCount, optimizeOrderingViaHeuristic)
 
 import Dagre.Order.CrossCount as DOC
 import Dagre.Order.Heuristic.Barycenter as DOHB
@@ -14,35 +14,34 @@ import IntDict
 -}
 
 
-optimizeOrderingViaHeuristic : DU.RankedLayers -> ( Int, Int, Int ) -> Best -> DU.NodeOrderDict -> DU.NodeOrderDict
-optimizeOrderingViaHeuristic layering ( iter, maxIter, trying ) best nodeOrderDict =
-    if iter < maxIter && trying < minQuit && best.crossCount /= 0 then
+optimizeOrderingViaHeuristic : DU.RankedLayers -> ( Int, Int, Int ) -> HeuristicAccumulator -> HeuristicAccumulator
+optimizeOrderingViaHeuristic layering ( iter, maxIter, trying ) heuristicAccumulator =
+    if iter < maxIter && trying < minQuit && heuristicAccumulator.best.crossCount /= 0 then
         let
             newNodeOrderDict =
-                sweepLayers layering iter nodeOrderDict
+                sweepLayers layering iter heuristicAccumulator.current.nodeOrderDict
 
-            newCC =
-                DOC.crossCount layering newNodeOrderDict
+            current =
+                { crossCount = DOC.crossCount layering newNodeOrderDict
+                , nodeOrderDict = newNodeOrderDict
+                }
         in
-        if newCC < best.crossCount then
+        if current.crossCount <= heuristicAccumulator.best.crossCount then
             let
                 newTrying =
-                    if toFloat newCC < convergence * toFloat best.crossCount then
+                    if toFloat current.crossCount < convergence * toFloat heuristicAccumulator.best.crossCount then
                         0
 
                     else
                         trying + 1
             in
-            optimizeOrderingViaHeuristic layering ( iter + 1, maxIter, newTrying ) { crossCount = newCC, nodeOrderDict = newNodeOrderDict } newNodeOrderDict
+            optimizeOrderingViaHeuristic layering ( iter + 1, maxIter, newTrying ) { current = current, best = current }
 
         else
-            optimizeOrderingViaHeuristic layering ( iter + 1, maxIter, trying + 1 ) best newNodeOrderDict
-
-    else if best.crossCount > 0 then
-        DOHT.transpose layering False best.nodeOrderDict
+            optimizeOrderingViaHeuristic layering ( iter + 1, maxIter, trying + 1 ) { heuristicAccumulator | current = current }
 
     else
-        best.nodeOrderDict
+        heuristicAccumulator
 
 
 
@@ -107,7 +106,9 @@ apply heuristic fixedLayer reverse layer nodeOrderDict =
     let
         getAdjacentNodes : Graph.NodeId -> DU.Adjacency -> List Graph.NodeId
         getAdjacentNodes nodeId adjacency =
-            IntDict.get nodeId adjacency |> Maybe.withDefault []
+            IntDict.get nodeId adjacency
+                |> Maybe.withDefault []
+                |> List.map .otherNode
 
         heuristicValues =
             case fixedLayer of
@@ -190,13 +191,26 @@ compareHeuristicValues nodeOrderDict reverse a b =
 
 
 
-{- Best is a record that holds the best crossCount and nodeOrderDict
+{- This is a record that holds the current and best nodeOrderDictWithCrossCount
+   current is the current node orderings after applying the heuristic
+   best is the best node orderings before applying the heuristic
+-}
+
+
+type alias HeuristicAccumulator =
+    { current : NodeOrderWithCrossCount
+    , best : NodeOrderWithCrossCount
+    }
+
+
+
+{- This is a record that holds the crossCount and nodeOrderDict
    crossCount is the number of edge crossings in the graph
    nodeOrderDict is the dictionary that holds the order of nodes in each layer
 -}
 
 
-type alias Best =
+type alias NodeOrderWithCrossCount =
     { crossCount : Int
     , nodeOrderDict : DU.NodeOrderDict
     }

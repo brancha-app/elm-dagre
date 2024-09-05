@@ -30,13 +30,41 @@ assignRanks g =
         heightLevels =
             G.heightLevels g
 
-        toLayer : List (G.NodeContext n e) -> DU.Layer
-        toLayer nodes =
+        toOtherNodeOfEdge : G.NodeId -> ( G.NodeId, G.NodeId ) -> ( Int, Int ) -> DU.OtherNodeOfEdge
+        toOtherNodeOfEdge otherNodeId ( from, to ) ( fromRank, toRank ) =
+            DU.OtherNodeOfEdge
+                otherNodeId
+                { from = DU.RankedNode from fromRank
+                , to = DU.RankedNode to toRank
+                }
+
+        toLayer : Int -> List (G.NodeContext n e) -> DU.Layer
+        toLayer rank nodes =
             { nodes = List.map (.node >> .id) nodes
-            , incomingEdges = List.foldl (\nodeCtx inEdges -> IntDict.insert nodeCtx.node.id (IntDict.keys nodeCtx.incoming) inEdges) IntDict.empty nodes
-            , outgoingEdges = List.foldl (\nodeCtx outEdges -> IntDict.insert nodeCtx.node.id (IntDict.keys nodeCtx.outgoing) outEdges) IntDict.empty nodes
+            , incomingEdges =
+                List.foldl
+                    (\nodeCtx inEdges ->
+                        IntDict.insert nodeCtx.node.id
+                            (IntDict.keys nodeCtx.incoming
+                                |> List.map (\id -> toOtherNodeOfEdge id ( nodeCtx.node.id, id ) ( rank, rank - 1 ))
+                            )
+                            inEdges
+                    )
+                    IntDict.empty
+                    nodes
+            , outgoingEdges =
+                List.foldl
+                    (\nodeCtx outEdges ->
+                        IntDict.insert nodeCtx.node.id
+                            (IntDict.keys nodeCtx.outgoing
+                                |> List.map (\id -> toOtherNodeOfEdge id ( id, nodeCtx.node.id ) ( rank, rank + 1 ))
+                            )
+                            outEdges
+                    )
+                    IntDict.empty
+                    nodes
             }
     in
     heightLevels
-        |> List.indexedMap (\i nodes -> ( i, toLayer nodes ))
+        |> List.indexedMap (\i nodes -> ( i, toLayer i nodes ))
         |> IntDict.fromList

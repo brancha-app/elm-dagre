@@ -1,8 +1,11 @@
 module Dagre.Order exposing (vertexOrder)
 
+import Dagre.Order.ConnectedComponents as DOCC
 import Dagre.Order.CrossCount as DOC
 import Dagre.Order.Heuristic as DOH
+import Dagre.Order.Heuristic.Transpose as DOHT
 import Dagre.Order.Init as DOI
+import Dagre.Order.Init.BFS as BFS
 import Dagre.Utils as DU
 import IntDict
 
@@ -24,46 +27,164 @@ import IntDict
 vertexOrder : DU.RankedLayers -> DU.RankedLayers
 vertexOrder layering =
     let
+        rankedGraph =
+            DU.rankedLayersToGraph layering
+
+        minRankNodes =
+            IntDict.findMin layering
+                |> Maybe.map (Tuple.second >> .nodes)
+                |> Maybe.withDefault []
+
+        connectedComponentsDict =
+            DOCC.getConnectedComponents minRankNodes rankedGraph layering
+
+        crossingMinimisedComponents =
+            IntDict.map (always (minCross rankedGraph)) connectedComponentsDict
+    in
+    DOCC.mergeComponentsToRankedLayers crossingMinimisedComponents layering
+
+
+
+{- This function is the main function that minimizes the edge crossings between the layers
+   for a given connected component.
+-}
+
+
+minCross : DU.RankedGraph -> DU.ConnectedComponent -> DU.ConnectedComponent
+minCross rankedGraph connectedComponent =
+    let
+        -- can be used to re-init orderings for DynaDag
+        -- if we get a previous nodeOrderDict, then initialise the component using that
+        -- and make sure to re-number orders from 0, new nodes can be handled as they are being now
+        -- then run the mincross algorithm
         initNodeOrderDict =
-            DOI.initOrder layering
+            DOI.initOrder connectedComponent.rankedLayers
 
-        bestCC =
-            DOC.crossCount layering initNodeOrderDict
-
-        initBest : DOH.Best
-        initBest =
-            { nodeOrderDict = initNodeOrderDict
-            , crossCount = bestCC
+        current =
+            { crossCount = DOC.crossCount connectedComponent.rankedLayers initNodeOrderDict
+            , nodeOrderDict = initNodeOrderDict
             }
 
-        finalBestOrdering =
-            DOH.optimizeOrderingViaHeuristic layering ( 0, 24, 0 ) initBest initNodeOrderDict
+        heuristicAccumulator =
+            { current = current
+            , best = current
+            }
+
+        { best } =
+            minCrossPass rankedGraph connectedComponent 0 heuristicAccumulator
+
+        bestNodeOrderDict =
+            if best.crossCount > 0 then
+                DOHT.transpose connectedComponent.rankedLayers False best.nodeOrderDict
+
+            else
+                best.nodeOrderDict
 
         finalRankedLayers =
-            DU.syncRankedLayersWithNodeOrderDict layering finalBestOrdering
+            DU.syncRankedLayersWithNodeOrderDict connectedComponent.rankedLayers bestNodeOrderDict
     in
-    finalRankedLayers
+    { connectedComponent
+        | rankedLayers = finalRankedLayers
+    }
 
 
 
--- TODO
--- 1. Initialise the ranking of nodes using BFS as in GraphViz
--- 2. Implement pass logic to apply heuristics to reduce edge crossings
---     Search for this line in lib/dotgen/mincross.c -> mincross() function 'for (pass = startpass; pass <= endpass; pass++) {'
---
---
--- {- 	install nodes in ranks. the initial ordering ensure that series-parallel
---    graphs such as trees are drawn with no crossings.  it tries searching
---    in- and out-edges and takes the better of the two initial orderings.
---    Taken from GraphViz implementation
--- -}
--- buildRanks : DU.RankedLayers -> Neighbours -> DU.NodeOrderDict
--- buildRanks layering along =
---     let
---         initNodeOrderDict =
---             DOI.initOrder layering
---     in
---     initNodeOrderDict
--- type Neighbours
---     = AlongOutgoingEdges
---     | AlongIncomingEdges
+{-
+   if pass == 0
+       then run BuildRanks along outgoing edges
+       run heuristic withBestCC initialised with default ordering
+   if pass == 1
+       then run BuildRanks along incoming edges
+       run heuristic withBestCC initialised with bestCC and bestNodeOrderDict and inNodeOrderBFSDict from pass 0
+
+   if pass == 2
+       just run heuristic on the bestNodeOrderDict,bestCC returned from pass 1
+
+   if pass > 2
+       return the heuristicAccumulator
+
+
+-}
+
+
+minCrossPass : DU.RankedGraph -> DU.ConnectedComponent -> Int -> DOH.HeuristicAccumulator -> DOH.HeuristicAccumulator
+minCrossPass rankedGraph connectedComponent pass heuristicAccumulator =
+    case pass of
+        0 ->
+            let
+                buildRankNodeOrder =
+                    BFS.buildRanks BFS.AlongOutgoing rankedGraph connectedComponent
+
+                current =
+                    { crossCount = DOC.crossCount connectedComponent.rankedLayers buildRankNodeOrder
+                    , nodeOrderDict = buildRankNodeOrder
+                    }
+
+                initAcc =
+                    { heuristicAccumulator
+                        | current = current
+                        , best =
+                            if current.crossCount <= heuristicAccumulator.best.crossCount then
+                                current
+
+                            else
+                                heuristicAccumulator.best
+                    }
+
+                optAcc =
+                    DOH.optimizeOrderingViaHeuristic connectedComponent.rankedLayers ( 0, 4, 0 ) initAcc
+            in
+            if optAcc.best.crossCount == 0 then
+                optAcc
+
+            else
+                minCrossPass rankedGraph connectedComponent 1 optAcc
+
+        1 ->
+            let
+                buildRankNodeOrder =
+                    BFS.buildRanks BFS.AlongIncoming rankedGraph connectedComponent
+
+                current =
+                    { crossCount = DOC.crossCount connectedComponent.rankedLayers buildRankNodeOrder
+                    , nodeOrderDict = buildRankNodeOrder
+                    }
+
+                initAcc =
+                    { heuristicAccumulator
+                        | current = current
+                        , best =
+                            if current.crossCount <= heuristicAccumulator.best.crossCount then
+                                current
+
+                            else
+                                heuristicAccumulator.best
+                    }
+
+                optAcc =
+                    DOH.optimizeOrderingViaHeuristic connectedComponent.rankedLayers ( 0, 4, 0 ) initAcc
+            in
+            if optAcc.best.crossCount == 0 then
+                optAcc
+
+            else
+                minCrossPass rankedGraph connectedComponent 2 optAcc
+
+        2 ->
+            let
+                initAcc =
+                    if heuristicAccumulator.current.crossCount > heuristicAccumulator.best.crossCount then
+                        { heuristicAccumulator
+                            | current = heuristicAccumulator.best
+                        }
+
+                    else
+                        heuristicAccumulator
+
+                optAcc =
+                    DOH.optimizeOrderingViaHeuristic connectedComponent.rankedLayers ( 0, 24, 0 ) initAcc
+            in
+            optAcc
+
+        _ ->
+            heuristicAccumulator
