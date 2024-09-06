@@ -41,12 +41,13 @@ assignRanks g =
         toLayer : Int -> List (G.NodeContext n e) -> DU.Layer
         toLayer rank nodes =
             { nodes = List.map (.node >> .id) nodes
+            , nodesCount = List.length nodes
             , incomingEdges =
                 List.foldl
                     (\nodeCtx inEdges ->
                         IntDict.insert nodeCtx.node.id
                             (IntDict.keys nodeCtx.incoming
-                                |> List.map (\id -> toOtherNodeOfEdge id ( nodeCtx.node.id, id ) ( rank, rank - 1 ))
+                                |> List.map (\id -> toOtherNodeOfEdge id ( id, nodeCtx.node.id ) ( rank, rank - 1 ))
                             )
                             inEdges
                     )
@@ -57,7 +58,7 @@ assignRanks g =
                     (\nodeCtx outEdges ->
                         IntDict.insert nodeCtx.node.id
                             (IntDict.keys nodeCtx.outgoing
-                                |> List.map (\id -> toOtherNodeOfEdge id ( id, nodeCtx.node.id ) ( rank, rank + 1 ))
+                                |> List.map (\id -> toOtherNodeOfEdge id ( nodeCtx.node.id, id ) ( rank, rank + 1 ))
                             )
                             outEdges
                     )

@@ -27,7 +27,7 @@ getConnectedComponents minRankNodes graph rankedLayers =
                 minRankNodes
 
         connectedComponentsDict =
-            List.filter (\connectedComponent -> connectedComponent.size > 1) allConnectedComponents
+            List.filter (\connectedComponent -> connectedComponent.size > 0) allConnectedComponents
                 |> List.sortBy .size
                 |> List.reverse
                 |> List.indexedMap (\i connectedComponent -> ( i, connectedComponent ))
@@ -96,6 +96,7 @@ addNodeToConnectedComponent unPartitionedRankedLayers node connectedComp =
         updatedLayer =
             { layer
                 | nodes = layer.nodes ++ [ node.id ]
+                , nodesCount = layer.nodesCount + 1
                 , incomingEdges =
                     IntDict.insert node.id incomingEdges layer.incomingEdges
                 , outgoingEdges =

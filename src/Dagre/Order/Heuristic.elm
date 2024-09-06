@@ -4,6 +4,7 @@ import Dagre.Order.CrossCount as DOC
 import Dagre.Order.Heuristic.Barycenter as DOHB
 import Dagre.Order.Heuristic.Transpose as DOHT
 import Dagre.Utils as DU
+import Dict
 import Graph
 import IntDict
 
@@ -139,7 +140,7 @@ apply heuristic fixedLayer reverse layer nodeOrderDict =
                 (\{ id, heuristicValue } ->
                     case heuristicValue of
                         Just value ->
-                            Just { id = id, heuristicValue = value }
+                            Just { id = id, heuristicValue = value, previousOrder = DU.getOrder nodeOrderDict id }
 
                         Nothing ->
                             Nothing
@@ -151,43 +152,63 @@ apply heuristic fixedLayer reverse layer nodeOrderDict =
                 |> List.sort
 
         newOrder =
-            List.sortWith (compareHeuristicValues nodeOrderDict reverse) needReordering
-                |> List.map2 (\order { id } -> ( id, order )) availableOrders
+            sortByHeuristicValue layer.nodesCount reverse needReordering
+                |> List.map2 (\order id -> ( id, order )) availableOrders
     in
     List.foldl (\( nodeId, order ) nodeOrdDict -> IntDict.insert nodeId order nodeOrdDict) nodeOrderDict newOrder
 
 
 
-{- Compare the heuristic values of two nodes
+{- Sort the affected nodes based on heuristic values
    if heuristic values are same then switch only if a appears before b in the current order and reverse is true
 
-   Note : This optimization is taken from GraphViz, although it is not exactly same, as graphviz uses bubble sort to sort the nodes
-   based on heuristic values, but it is not implemented here, and uses the List.sortWith function to sort the nodes based on heuristic values
-   GraphViz orders Adjacent nodes repeatedly like in bubblesort, and swaps the nodes with same heuristic values only if reverse is true
+   Note : This optimization is taken from GraphViz, although it is not exactly same, but achieves the same result
+          as the original algorithm. It first sorts the heuristic values and if nodes have same heuristic values
+          then it sorts them based on the previous order of the nodes. If reverse is true then it shifts the nodes
+            by (total_nodes_in_layer mod count_of_nodes_with_same_heuristic_value) to the left
 
 -}
 
 
-compareHeuristicValues : DU.NodeOrderDict -> Bool -> NodeAndHeuristicValue -> NodeAndHeuristicValue -> Order
-compareHeuristicValues nodeOrderDict reverse a b =
-    case compare a.heuristicValue b.heuristicValue of
-        LT ->
-            LT
-
-        GT ->
-            GT
-
-        EQ ->
-            case compare (DU.getOrder nodeOrderDict a.id) (DU.getOrder nodeOrderDict b.id) of
-                LT ->
-                    if reverse then
-                        GT
+sortByHeuristicValue : Int -> Bool -> List NodeAndHeuristicValue -> List Graph.NodeId
+sortByHeuristicValue nodeCount reverse heuristicValues =
+    let
+        dict =
+            List.foldl
+                (\nodeAndHeuristic sortDict ->
+                    if Dict.member nodeAndHeuristic.heuristicValue sortDict then
+                        Dict.update nodeAndHeuristic.heuristicValue (\nodes -> Maybe.map (\( n, size ) -> ( n ++ [ nodeAndHeuristic ], size + 1 )) nodes) sortDict
 
                     else
-                        LT
+                        Dict.insert nodeAndHeuristic.heuristicValue ( [ nodeAndHeuristic ], 1 ) sortDict
+                )
+                Dict.empty
+                heuristicValues
 
-                _ ->
-                    EQ
+        dictSorted =
+            Dict.map
+                (\_ ( v, s ) ->
+                    let
+                        sorted =
+                            List.sortBy .previousOrder v
+                    in
+                    if reverse then
+                        let
+                            shiftCount =
+                                modBy s nodeCount
+                        in
+                        List.drop shiftCount sorted ++ List.take shiftCount sorted
+
+                    else
+                        sorted
+                )
+                dict
+                |> Dict.toList
+                |> List.sortBy Tuple.first
+                |> List.map Tuple.second
+                |> List.concat
+    in
+    List.map .id dictSorted
 
 
 
@@ -217,7 +238,7 @@ type alias NodeOrderWithCrossCount =
 
 
 type alias NodeAndHeuristicValue =
-    { id : Graph.NodeId, heuristicValue : Float }
+    { id : Graph.NodeId, heuristicValue : Float, previousOrder : Int }
 
 
 

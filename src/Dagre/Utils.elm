@@ -61,6 +61,7 @@ type alias Adjacency =
 
 type alias Layer =
     { nodes : List G.NodeId
+    , nodesCount : Int
     , incomingEdges : Adjacency -- key is to node, value is list of from nodes (to node belongs to this layer)
     , outgoingEdges : Adjacency -- key is from node, value is list of to nodes (from node belongs to this layer)
     }
@@ -332,6 +333,7 @@ getLayer rank rankedLayers =
     in
     Maybe.withDefault
         { nodes = []
+        , nodesCount = 0
         , incomingEdges = IntDict.empty
         , outgoingEdges = IntDict.empty
         }

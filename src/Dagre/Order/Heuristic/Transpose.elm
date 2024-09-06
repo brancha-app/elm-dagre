@@ -4,6 +4,7 @@ import Dagre.Order.CrossCount as DOC
 import Dagre.Utils as DU
 import Graph
 import IntDict
+import Set exposing (Set)
 
 
 
@@ -18,30 +19,53 @@ import IntDict
 
 transpose : DU.RankedLayers -> Bool -> DU.NodeOrderDict -> DU.NodeOrderDict
 transpose rankedLayers reverse nodeOrderDict =
-    -- todo : add untangle logic by adding delta based rerunning of transpose, make it configurable to be turned on/off by user
-    IntDict.foldl (\_ layer nodeOdrDict -> optimizeLayer layer reverse nodeOdrDict) nodeOrderDict rankedLayers
+    transposeCandidates Set.empty rankedLayers reverse nodeOrderDict
 
 
 
-{-
-   The following function tries to optimize position of nodes by
-   swapping adjacent nodes in the given layer.
+{- This function transposes the candidate layers
+   and returns the updated nodeOrderDict
+   It uses delta to rerun the transposeCandidates, if the number of crossings are reduced
 -}
 
 
-optimizeLayer : DU.Layer -> Bool -> DU.NodeOrderDict -> DU.NodeOrderDict
-optimizeLayer layer reverse nodeOrderDict =
+transposeCandidates : Set Int -> DU.RankedLayers -> Bool -> DU.NodeOrderDict -> DU.NodeOrderDict
+transposeCandidates nonCandidates rankedLayers reverse nodeOrderDict =
     let
-        nodesSortedByOrder =
-            List.map (\node -> ( node, DU.getOrder nodeOrderDict node )) layer.nodes
-                |> List.sortBy Tuple.second
-                |> List.map Tuple.first
-
-        newOrder =
-            applyTranspose layer nodeOrderDict reverse nodesSortedByOrder
+        ( newNodeOrderDict, delta, updatedNonCandidates ) =
+            IntDict.foldl (\rank layer acc -> optimizeLayer ( rank, layer ) reverse acc) ( nodeOrderDict, 0, nonCandidates ) rankedLayers
     in
-    List.indexedMap (\idx node -> ( node, idx )) newOrder
-        |> List.foldl (\( node, order ) nodeOdrDict -> IntDict.insert node order nodeOdrDict) nodeOrderDict
+    if delta > 0 then
+        transposeCandidates updatedNonCandidates rankedLayers reverse newNodeOrderDict
+
+    else
+        newNodeOrderDict
+
+
+optimizeLayer : ( Int, DU.Layer ) -> Bool -> ( DU.NodeOrderDict, Int, Set Int ) -> ( DU.NodeOrderDict, Int, Set Int )
+optimizeLayer ( rank, layer ) reverse ( nodeOrderDict, delta, nonCandidates ) =
+    if Set.member rank nonCandidates then
+        ( nodeOrderDict, delta, nonCandidates )
+
+    else
+        let
+            nodesSortedByOrder =
+                List.map (\node -> ( node, DU.getOrder nodeOrderDict node )) layer.nodes
+                    |> List.sortBy Tuple.second
+                    |> List.map Tuple.first
+
+            ( newOrder, deltaCurrentLayer ) =
+                applyTranspose layer nodeOrderDict reverse nodesSortedByOrder
+        in
+        if deltaCurrentLayer == 0 then
+            ( nodeOrderDict, delta, Set.insert rank nonCandidates )
+
+        else
+            ( List.indexedMap (\idx node -> ( node, idx )) newOrder
+                |> List.foldl (\( node, order ) nodeOdrDict -> IntDict.insert node order nodeOdrDict) nodeOrderDict
+            , delta + deltaCurrentLayer
+            , nonCandidates
+            )
 
 
 
@@ -49,17 +73,18 @@ optimizeLayer layer reverse nodeOrderDict =
    The following function applies the transpose heuristic
    if it reduces the number of crossings then it
    swaps the i^th node with i+1^th node
+   delta is the number of crossings reduced by this operation
 -}
 
 
-applyTranspose : DU.Layer -> DU.NodeOrderDict -> Bool -> List Graph.NodeId -> List Graph.NodeId
+applyTranspose : DU.Layer -> DU.NodeOrderDict -> Bool -> List Graph.NodeId -> ( List Graph.NodeId, Int )
 applyTranspose layer nodeOrderDict reverse remainingNodes =
     case remainingNodes of
         [] ->
-            []
+            ( [], 0 )
 
         [ x ] ->
-            [ x ]
+            ( [ x ], 0 )
 
         v :: w :: xs ->
             let
@@ -72,7 +97,15 @@ applyTranspose layer nodeOrderDict reverse remainingNodes =
             if c1 < c0 || (c0 > 0 && reverse && c1 == c0) then
                 -- swap v and w if it reduces the number of crossings
                 -- or if the number of crossings is same and reverse is true
-                w :: applyTranspose layer nodeOrderDict reverse (v :: xs)
+                let
+                    ( transposedXs, deltaXs ) =
+                        applyTranspose layer nodeOrderDict reverse (v :: xs)
+                in
+                ( w :: transposedXs, c0 - c1 + deltaXs )
 
             else
-                v :: applyTranspose layer nodeOrderDict reverse (w :: xs)
+                let
+                    ( transposedXs, deltaXs ) =
+                        applyTranspose layer nodeOrderDict reverse (w :: xs)
+                in
+                ( v :: transposedXs, deltaXs )
