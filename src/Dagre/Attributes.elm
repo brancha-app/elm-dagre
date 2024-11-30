@@ -1,6 +1,8 @@
 module Dagre.Attributes exposing
     ( RankDir(..), Config, Attribute
     , rankDir, widthDict, heightDict, width, height, nodeSep, edgeSep, rankSep, marginX, marginY, initDummyNodeId
+    , positionBias, heuristic, reversePriority, persistentTranspose
+    , Heuristic(..), PositioningBias(..)
     )
 
 {-| Dagre Configuration Attributes
@@ -23,6 +25,18 @@ These function set the respective attributes for the algorithm
 
 @docs rankDir, widthDict, heightDict, width, height, nodeSep, edgeSep, rankSep, marginX, marginY, initDummyNodeId
 
+
+# Advanced Attributes
+
+These attributes are used to set the advanced configuration for the algorithm
+**Note** :
+
+1.  These attributes are not recommended for general use, as they are used to set the advanced configuration for the algorithm.
+2.  Use these attributes only if you are sure about the values you are setting.
+3.  The default values are set to the values that are used by the algorithm, so you can safely ignore these attributes.
+
+@docs positionBias, heuristic, reversePriority, persistentTranspose
+
 -}
 
 import Dict exposing (Dict)
@@ -37,6 +51,7 @@ see associated attributes.
 -}
 type alias Config =
     { rankDir : RankDir
+    , order : Dict G.NodeId Float
     , widthDict : Dict G.NodeId Float
     , heightDict : Dict G.NodeId Float
     , width : Float
@@ -47,6 +62,10 @@ type alias Config =
     , marginX : Float
     , marginY : Float
     , initDummyNodeId : Maybe G.NodeId
+    , positionBias : PositioningBias
+    , heuristic : Heuristic
+    , reversePriority : Bool
+    , persistentTranspose : Bool
     }
 
 
@@ -66,6 +85,10 @@ type RankDir
 -}
 type alias Attribute =
     Config -> Config
+
+
+
+-- A T T R I B U T E S --
 
 
 {-| The rankDir defines the direction for rank nodes.
@@ -219,3 +242,88 @@ initDummyNodeId : G.NodeId -> Attribute
 initDummyNodeId dummyId =
     \a ->
         { a | initDummyNodeId = Just dummyId }
+
+
+
+-- A D V A N C E D   A T T R I B U T E S --
+
+
+{-| This type defines the positioning bias used for the coordinate assignment phase of the algorithm.
+The values are defined for a Top to Bottom rank direction of the graph. But the values can be used for other rank directions as well.
+The values are defined as follows:
+
+  - UL : Upper Left
+  - UR : Upper Right
+  - DL : Down Left
+  - DR : Down Right
+
+-}
+type PositioningBias
+    = UL
+    | UR
+    | DL
+    | DR
+    | Balanced
+
+
+{-| This type defines the crossing minimization heuristic used in Vertex Ordering Phase of the algorithm.
+The values are defined as follows:
+
+  - Barycenter
+  - Median
+  - WeightedMedian
+
+**Todo** : Add the missing heuristics (Median, WeightedMedian), and their respective implementations.
+
+-}
+type Heuristic
+    = Barycenter
+    | Median
+    | WeightedMedian
+
+
+{-| This function sets the positioning bias for the coordinate assignment phase of the algorithm.
+The default value is Balanced, which means the algorithm will try to balance the nodes in the graph, so that the graph looks more symmetric.
+-}
+positionBias : PositioningBias -> Attribute
+positionBias bias =
+    \a ->
+        { a | positionBias = bias }
+
+
+{-| This function sets the heuristic for the vertex ordering phase of the algorithm.
+The default value is Barycenter, which means the barycenter heuristic will be used to minimize the edge crossings between the layers.
+
+**Todo** : Implement the Median and WeightedMedian heuristics.
+
+-}
+heuristic : Heuristic -> Attribute
+heuristic h =
+    \a ->
+        { a | heuristic = h }
+
+
+{-| This function sets the priority for ordering nodes within the same rank.
+The default value is False, which means the nodes with lower order value will be placed before the nodes with higher order value.
+In case of two nodes with same order value, the nodes will be placed based on their node ids.
+
+**Todo** : Implement the priority ordering for nodes within the same rank. This feature is not yet implemented.
+
+-}
+reversePriority : Bool -> Attribute
+reversePriority rev =
+    \a ->
+        { a | reversePriority = rev }
+
+
+{-| This function sets the persistent transpose flag for vertex ordering phase of the algorithm.
+This flag is used within transpose heuristic, and will keep transposing the graph as long as the cross count is decreasing within a single pass.
+The default value is True, which means the graph will be transposed until the cross count is decreasing.
+
+**Todo** : Make the transpose heuristic respect the persistent transpose flag.
+
+-}
+persistentTranspose : Bool -> Attribute
+persistentTranspose pt =
+    \a ->
+        { a | persistentTranspose = pt }

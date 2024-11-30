@@ -60,6 +60,7 @@ For more details about configuring a layout please see Dagre.Attributes
 defaultConfig : DA.Config
 defaultConfig =
     { rankDir = DA.TB
+    , order = Dict.empty
     , widthDict = Dict.empty
     , heightDict = Dict.empty
     , width = 32
@@ -70,6 +71,10 @@ defaultConfig =
     , marginX = 20
     , marginY = 20
     , initDummyNodeId = Nothing
+    , positionBias = DA.Balanced
+    , heuristic = DA.Barycenter
+    , reversePriority = False
+    , persistentTranspose = True
     }
 
 

@@ -67,8 +67,41 @@ positionX config g ( rankList, edges ) =
             type1Conflicts
 
         vhDir =
-            List.map (\v -> List.map (\h -> ( v, h )) [ Left, Right ]) [ Up, Down ]
-                |> List.concat
+            if config.rankDir == DA.BT || config.rankDir == DA.RL then
+                case config.positionBias of
+                    DA.UL ->
+                        [ ( Down, Left ) ]
+
+                    DA.UR ->
+                        [ ( Down, Right ) ]
+
+                    DA.DL ->
+                        [ ( Up, Left ) ]
+
+                    DA.DR ->
+                        [ ( Up, Right ) ]
+
+                    DA.Balanced ->
+                        List.map (\v -> List.map (\h -> ( v, h )) [ Left, Right ]) [ Up, Down ]
+                            |> List.concat
+
+            else
+                case config.positionBias of
+                    DA.UL ->
+                        [ ( Up, Left ) ]
+
+                    DA.UR ->
+                        [ ( Up, Right ) ]
+
+                    DA.DL ->
+                        [ ( Down, Left ) ]
+
+                    DA.DR ->
+                        [ ( Down, Right ) ]
+
+                    DA.Balanced ->
+                        List.map (\v -> List.map (\h -> ( v, h )) [ Left, Right ]) [ Up, Down ]
+                            |> List.concat
 
         xss =
             List.map (\d -> ( d, positionXHelper config g ( rankList, edges ) conflicts d )) vhDir
